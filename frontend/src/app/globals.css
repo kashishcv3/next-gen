@@ -1,0 +1,21 @@
+/*
+  Minimal globals - the old platform's CSS files (adminui.css, sb-admin.css)
+  handle all the actual styling via /public/css/
+*/
+
+/* Font face declarations for locally hosted fonts */
+@font-face {
+  font-family: 'BebasNeuewebfont';
+  src: url('/fonts/BebasNeuewebfont.eot');
+  src: local('BebasNeuewebfont'), url('/fonts/BebasNeuewebfont.woff') format('woff'), url('/fonts/BebasNeuewebfont.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'OpenSansRegular';
+  src: url('/fonts/OpenSansRegular.eot');
+  src: local('OpenSansRegular'), url('/fonts/OpenSansRegular.woff') format('woff'), url('/fonts/OpenSansRegular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'LatoLig';
+  src: url('/fonts/LatoLig.eot');
+  src: local('LatoLig'), url('/fonts/LatoLig.woff') format('woff'), url('/fonts/LatoLig.ttf') format('truetype');
+}
