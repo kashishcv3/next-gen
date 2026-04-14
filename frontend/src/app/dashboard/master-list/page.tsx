@@ -11,17 +11,18 @@ interface Store {
   display_name: string;
   date_created: string;
   is_live: string;
+  domain: string;
   secure_domain: string;
   bill: string;
   bill_note: string;
-  in_cloud: number;
+  in_cloud: string;
 }
 
 interface Subuser {
   uid: number;
   username: string;
-  user_type: string;
   co_name: string;
+  admin_id: number;
   stores: Store[];
 }
 
@@ -30,6 +31,7 @@ interface Developer {
   username: string;
   user_type: string;
   co_name: string;
+  admin: string;
   total_stores: number;
   stores: Store[];
   subusers: Subuser[];
@@ -37,6 +39,7 @@ interface Developer {
 
 interface MasterListData {
   developers: Developer[];
+  display: string;
 }
 
 export default function MasterListPage() {
@@ -68,14 +71,9 @@ export default function MasterListPage() {
     return display === String(developerUid) || display === 'all';
   };
 
+  // Dates are pre-formatted (MM/DD/YYYY) from the backend
   const formatDate = (dateString: string | null) => {
-    if (!dateString) return '';
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US');
-    } catch {
-      return dateString;
-    }
+    return dateString || '';
   };
 
   if (loading) {
@@ -153,7 +151,7 @@ export default function MasterListPage() {
                         {/* Developer Row */}
                         <tr>
                           <td>
-                            <a href={`/admin/mainpage/${developer.uid}`}>{developer.username}</a>
+                            <a href={`/dashboard/mainpage/${developer.uid}`}>{developer.username}</a>
                           </td>
                           <td className="text-center">{developer.co_name || ''}</td>
                           <td className="text-center">{developer.total_stores || 0}</td>
@@ -165,7 +163,7 @@ export default function MasterListPage() {
                             <center>
                               {developer.subusers.length === 0 ? (
                                 <a
-                                  href={`/admin/account_delete/0/${developer.username}`}
+                                  href={`/dashboard/account-delete/${developer.username}`}
                                   className="delete-tooltip"
                                   title="Delete User"
                                 >
@@ -186,7 +184,7 @@ export default function MasterListPage() {
                               <tr key={`dev-store-${store.site_id}`}>
                                 <td colSpan={1}>
                                   &nbsp;&nbsp;&nbsp;
-                                  <a href={`/admin/links/${store.site_id}`}>{store.name}</a>
+                                  <a href={`/dashboard/links/${store.site_id}`}>{store.name}</a>
                                   {store.is_live === 'y' && (
                                     <>
                                       &nbsp;
@@ -230,7 +228,7 @@ export default function MasterListPage() {
                                 )}
                                 <td className="cv3-actions">
                                   <center>
-                                    <a href={`/admin/store_changelog/${store.site_id}`} title="View Change Log">
+                                    <a href={`/dashboard/store-changelog/${store.site_id}`} title="View Change Log">
                                       <i className="fa fa-history"></i>
                                     </a>
                                   </center>
@@ -238,7 +236,7 @@ export default function MasterListPage() {
                                 <td className="cv3-actions">
                                   <center>
                                     <a
-                                      href={`/admin/store_delete/${store.site_id}`}
+                                      href={`/dashboard/store-delete/${store.site_id}`}
                                       className="delete-tooltip"
                                       title="Delete Store"
                                     >
@@ -255,7 +253,7 @@ export default function MasterListPage() {
                                 {/* Subuser Row */}
                                 <tr>
                                   <td>
-                                    <a href={`/admin/account_info/0/${subuser.uid}`}>{subuser.username}</a>
+                                    <a href={`/dashboard/account-info/${subuser.uid}`}>{subuser.username}</a>
                                   </td>
                                   <td className="text-center">{subuser.co_name || ''}</td>
                                   <td className="text-center">&nbsp;</td>
@@ -267,7 +265,7 @@ export default function MasterListPage() {
                                     <center>
                                       {subuser.stores.length === 0 ? (
                                         <a
-                                          href={`/admin/account_delete/0/${subuser.username}`}
+                                          href={`/dashboard/account-delete/${subuser.username}`}
                                           className="delete-tooltip"
                                           title="Delete User"
                                         >
@@ -285,7 +283,7 @@ export default function MasterListPage() {
                                   <tr key={`subuser-store-${store.site_id}`}>
                                     <td colSpan={1}>
                                       &nbsp;&nbsp;&nbsp;
-                                      <a href={`/admin/links/${store.site_id}`}>{store.name}</a>
+                                      <a href={`/dashboard/links/${store.site_id}`}>{store.name}</a>
                                       {store.is_live === 'y' && (
                                         <>
                                           &nbsp;
@@ -332,7 +330,7 @@ export default function MasterListPage() {
                                     )}
                                     <td className="cv3-actions">
                                       <center>
-                                        <a href={`/admin/store_changelog/${store.site_id}`} title="View Change Log">
+                                        <a href={`/dashboard/store-changelog/${store.site_id}`} title="View Change Log">
                                           <i className="fa fa-history"></i>
                                         </a>
                                       </center>
@@ -340,7 +338,7 @@ export default function MasterListPage() {
                                     <td className="cv3-actions">
                                       <center>
                                         <a
-                                          href={`/admin/store_delete/${store.site_id}`}
+                                          href={`/dashboard/store-delete/${store.site_id}`}
                                           className="delete-tooltip"
                                           title="Delete Store"
                                         >

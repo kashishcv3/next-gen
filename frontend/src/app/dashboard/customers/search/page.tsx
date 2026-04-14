@@ -6,155 +6,114 @@ import Link from 'next/link';
 
 interface Customer {
   id: string;
-  name: string;
   email: string;
-  phone: string;
-  status: string;
-  created_date: string;
+  first_name: string;
+  last_name: string;
+  created_at: string;
 }
 
 export default function CustomerSearchPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [search, setSearch] = useState('');
 
-  const handleSearch = async () => {
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('search', searchTerm);
-      if (statusFilter !== 'all') params.append('status', statusFilter);
-
-      const response = await api.get(`/customers?${params.toString()}`);
-      setCustomers(response.data.data || []);
-      setError(null);
-    } catch (err) {
-      console.error('Failed to search customers:', err);
-      setError('Failed to load customers');
+      const res = await api.get('/accounts/customers', {
+        params: { search: search || undefined },
+      });
+      setCustomers(res.data.data || []);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to search customers');
     } finally {
       setLoading(false);
     }
   };
 
-  const formatDate = (dateString: string) => {
+  const handleDelete = async (customerId: string) => {
+    if (!window.confirm('Delete this customer?')) return;
     try {
-      return new Date(dateString).toLocaleDateString();
-    } catch {
-      return dateString;
+      await api.delete(`/accounts/customers/${customerId}`);
+      setCustomers(customers.filter(c => c.id !== customerId));
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to delete customer');
     }
   };
 
   return (
-    <div className="container-fluid" style={{ padding: '20px' }}>
-      <h1>Search Customers</h1>
-
-      {/* Search Panel */}
-      <div className="panel panel-default" style={{ marginBottom: '20px' }}>
-        <div className="panel-heading">
-          <h3 className="panel-title">Search Criteria</h3>
-        </div>
-        <div className="panel-body">
-          <div className="row">
-            <div className="col-md-6">
-              <div className="form-group">
-                <label htmlFor="search">Search by Name or Email</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  id="search"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                  placeholder="Enter name or email..."
-                />
-              </div>
-            </div>
-            <div className="col-md-3">
-              <div className="form-group">
-                <label htmlFor="status">Status</label>
-                <select
-                  className="form-control"
-                  id="status"
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                >
-                  <option value="all">All</option>
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
-              </div>
-            </div>
-            <div className="col-md-3">
-              <div style={{ marginTop: '25px' }}>
-                <button className="btn btn-primary" onClick={handleSearch} disabled={loading}>
-                  <i className="fa fa-search"></i> Search
-                </button>
-                <button
-                  className="btn btn-default"
-                  onClick={() => {
-                    setSearchTerm('');
-                    setStatusFilter('all');
-                    setCustomers([]);
-                  }
-                  style={{ marginLeft: '5px' }}
-                >
-                  Clear
-                </button>
-              </div>
-            </div>
-          </div>
+    <div>
+      <div className="row">
+        <div className="col-lg-12">
+          <h1>Customer Search</h1>
+          <p><i className="fa fa-info-circle"></i> Search and manage customer accounts.</p>
         </div>
       </div>
+      <br />
 
-      {error && <div className="alert alert-danger">{error}</div>}
-      {loading && <div className="alert alert-info">Searching customers...</div>}
+      {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger">{error}</div></div></div>}
 
-      {!loading && customers.length > 0 && (
-        <div className="panel panel-default">
-          <div className="panel-heading">
-            <h3 className="panel-title">Results ({customers.length})</h3>
-          </div>
-          <div className="table-responsive">
-            <table className="table table-striped table-hover">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Phone</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th style={{ width: '150px' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {customers.map((customer) => (
-                  <tr key={customer.id}>
-                    <td>{customer.name}</td>
-                    <td>{customer.email}</td>
-                    <td>{customer.phone}</td>
-                    <td>
-                      <span className={`label label-${customer.status === 'active' ? 'success' : 'default'}`}>
-                        {customer.status}
-                      </span>
-                    </td>
-                    <td>{formatDate(customer.created_date)}</td>
-                    <td>
-                      <Link href={`/customers/history/${customer.id}`} className="btn btn-xs btn-info">
-                        <i className="fa fa-history"></i> History
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div className="row">
+        <div className="col-lg-12">
+          <form onSubmit={handleSearch}>
+            <div className="input-group">
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Search by email or name..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <span className="input-group-btn">
+                <button type="submit" className="btn btn-primary"><i className="fa fa-search"></i> Search</button>
+                <Link href="/dashboard/customers/add" className="btn btn-success"><i className="fa fa-plus"></i> Add Customer</Link>
+              </span>
+            </div>
+          </form>
+        </div>
+      </div>
+      <br />
+
+      {(loading || customers.length > 0) && (
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="panel panel-primary">
+              <div className="panel-heading">
+                <h3 className="panel-title"><i className="fa fa-list"></i> Customer Results</h3>
+              </div>
+              <div className="table-responsive">
+                <table className="table table-striped table-hover">
+                  <thead>
+                    <tr><th>Email</th><th>Name</th><th>Created</th><th>Actions</th></tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <tr><td colSpan={4} className="text-center">Loading...</td></tr>
+                    ) : customers.length > 0 ? (
+                      customers.map(customer => (
+                        <tr key={customer.id}>
+                          <td>{customer.email}</td>
+                          <td>{customer.first_name} {customer.last_name}</td>
+                          <td>{new Date(customer.created_at).toLocaleDateString()}</td>
+                          <td>
+                            <Link href={`/dashboard/customers/info/${customer.id}`} className="btn btn-xs btn-info"><i className="fa fa-eye"></i></Link>
+                            <Link href={`/dashboard/customers/edit/${customer.id}`} className="btn btn-xs btn-warning"><i className="fa fa-edit"></i></Link>
+                            <button className="btn btn-xs btn-danger" onClick={() => handleDelete(customer.id)}><i className="fa fa-trash"></i></button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr><td colSpan={4} className="text-center">No customers found</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
-      )}
-
-      {!loading && customers.length === 0 && searchTerm && !error && (
-        <div className="alert alert-info">No customers found matching your criteria.</div>
       )}
     </div>
   );

@@ -30,9 +30,15 @@ api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      // Clear auth token and redirect to login
-      Cookies.remove('auth_token');
-      window.location.href = '/login';
+      // Don't redirect if the 401 came from login or MFA endpoints — let the
+      // page's own error handling show the message to the user.
+      const url = error.config?.url || '';
+      const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/verify-mfa');
+      if (!isAuthEndpoint) {
+        Cookies.remove('auth_token');
+        Cookies.remove('auth_user');
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }

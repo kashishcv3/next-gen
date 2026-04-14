@@ -3,97 +3,97 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-interface SalesRankRecord {
-  rank: number;
-  sku: string;
+interface SalesRankItem {
+  product_id: number;
   product_name: string;
-  quantity: number;
+  quantity_sold: number;
   revenue: number;
 }
 
-interface SalesRankData {
-  records: SalesRankRecord[];
+interface Report {
+  period: string;
+  total_items: number;
+  items: SalesRankItem[];
 }
 
-export default function SalesrankPage() {
-  const [data, setData] = useState<SalesRankData | null>(null);
+export default function SalesRankPage() {
+  const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState('month');
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await api.get('/reports/salesrank');
-        setData(response.data.data);
-        setError(null);
-      } catch (err: any) {
-        setError(err.response?.data?.message || 'Failed to load sales ranking');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
+    fetchReport();
+  }, [period]);
+
+  const fetchReport = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get(`/reports/sales-rank?period=${period}`);
+      setReport(response.data);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to fetch sales rank:', err);
+      setError('Failed to load sales rank report');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div>
-      <div className="row">
-        <div className="col-lg-12">
-          <h1>Sales Ranking Report</h1>
-          <p>
-            <i className="fa fa-info-circle"></i> View your best selling products ranked by sales volume.
-          </p>
+    <div className="container-fluid" style={{ padding: '20px' }}>
+      <h1>Sales Rank Report</h1>
+
+      {/* Period Selection */}
+      <div className="panel panel-default" style={{ marginBottom: '20px' }}>
+        <div className="panel-body">
+          <div className="btn-group" role="group">
+            {['day', 'week', 'month', 'year'].map((p) => (
+              <button
+                key={p}
+                className={`btn ${period === p ? 'btn-primary' : 'btn-default'}`}
+                onClick={() => setPeriod(p)}
+              >
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-      <br />
 
-      {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
+      {error && <div className="alert alert-danger">{error}</div>}
+      {loading && <div className="alert alert-info">Loading report...</div>}
+
+      {!loading && report && (
+        <div className="panel panel-default">
+          <div className="panel-heading">
+            <h3 className="panel-title">Top Selling Products ({report.total_items})</h3>
+          </div>
+          <div className="table-responsive">
+            <table className="table table-striped table-hover">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th style={{ width: '150px' }}>Quantity Sold</th>
+                  <th style={{ width: '150px' }}>Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.items.map((item, index) => (
+                  <tr key={index}>
+                    <td>{item.product_name}</td>
+                    <td>{item.quantity_sold}</td>
+                    <td>${item.revenue.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
-      {loading && (
-        <div className="row">
-          <div className="col-lg-12">
-            <p>Loading report data...</p>
-          </div>
-        </div>
-      )}
-
-      {!loading && data && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="well well-cv3-table">
-              <div className="table-responsive">
-                <table className="table table-hover table-striped cv3-data-table">
-                  <thead>
-                    <tr>
-                      <th className="text-center">Rank</th>
-                      <th className="text-center">SKU</th>
-                      <th className="text-center">Product Name</th>
-                      <th className="text-center">Quantity Sold</th>
-                      <th className="text-center">Revenue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.records.map((record, idx) => (
-                      <tr key={idx}>
-                        <td align="center">{record.rank}</td>
-                        <td align="center">{record.sku}</td>
-                        <td align="center">{record.product_name}</td>
-                        <td align="center">{record.quantity}</td>
-                        <td align="center">${record.revenue.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
+      {!loading && report && report.items.length === 0 && (
+        <div className="alert alert-info">No sales data for the selected period.</div>
       )}
     </div>
   );

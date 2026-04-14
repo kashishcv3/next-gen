@@ -1,95 +1,169 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { Container, Row, Col, Button, Table, Alert, Spinner, Card, Badge, Form } from 'react-bootstrap';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import Link from 'next/link';
 
 interface Product {
-  id: string;
-  name: string;
+  prod_id: number;
   sku: string;
+  prod_name: string;
+  is_parent: string;
+  inactive: string;
+  has_attributes: string;
 }
 
-export default function ProductByNamePage() {
-  const [products, setProducts] = useState<Product[]>([]);
+export default function ProductsByNamePage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [sort, setSort] = useState('prod_name');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchType, setSearchType] = useState('');
 
   useEffect(() => {
     fetchProducts();
-  }, []);
+  }, [sort, searchType, searchTerm]);
 
   const fetchProducts = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/products?sort=name');
-      setProducts(response.data.data || []);
+      setError(null);
+      const params = new URLSearchParams();
+      params.append('sort', sort);
+      if (searchType && searchTerm) {
+        params.append('search_type', searchType);
+        params.append('search_term', searchTerm);
+      }
+      const response = await api.get(`/products/by-name?${params.toString()}`);
+      setProducts(response.data.products || []);
     } catch (err) {
-      setError('Failed to load products');
+      setError(err instanceof Error ? err.message : 'Failed to fetch products');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleQuickFilter = (type: string) => {
+    setSearchType('type');
+    setSearchTerm(type);
+  };
+
+  if (loading) {
+    return (
+      <Container className="mt-4" fluid>
+        <Spinner animation="border" />
+      </Container>
+    );
+  }
+
   return (
-    <div>
-      <div className="row">
-        <div className="col-lg-12">
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
           <h1>Products by Name</h1>
-          <p><i className="fa fa-list"></i> View products sorted alphabetically.</p>
-        </div>
-      </div>
-      <br />
+        </Col>
+        <Col xs="auto">
+          <Button variant="primary" onClick={() => router.push('/dashboard/products/list')}>
+            <i className="fa fa-sitemap"></i> By Category
+          </Button>{' '}
+          <Button variant="primary" onClick={() => router.push('/dashboard/products/search')}>
+            <i className="fa fa-search"></i> Search
+          </Button>
+        </Col>
+      </Row>
 
-      {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
-          </div>
-        </div>
-      )}
+      {error && <Alert variant="danger">{error}</Alert>}
 
-      {loading ? (
-        <p>Loading...</p>
-      ) : (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="panel panel-default">
-              <div className="panel-heading">
-                <h3 className="panel-title">Products ({products.length})</h3>
-              </div>
-              <div className="panel-body">
-                {products.length === 0 ? (
-                  <p className="text-muted">No products found.</p>
-                ) : (
-                  <table className="table table-hover table-striped">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>SKU</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {products.map(product => (
-                        <tr key={product.id}>
-                          <td>{product.name}</td>
-                          <td>{product.sku}</td>
-                          <td>
-                            <Link href={`/products/edit/${product.id}`} className="btn btn-sm btn-default">
-                              Edit
-                            </Link>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <Card className="mb-4">
+        <Card.Body>
+          <h5>Quick Filters</h5>
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            className="me-2"
+            onClick={() => handleQuickFilter('featured')}
+          >
+            Featured
+          </Button>
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            className="me-2"
+            onClick={() => handleQuickFilter('special')}
+          >
+            On Special
+          </Button>
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            className="me-2"
+            onClick={() => handleQuickFilter('new')}
+          >
+            New
+          </Button>
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            className="me-2"
+            onClick={() => handleQuickFilter('active')}
+          >
+            Active
+          </Button>
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => handleQuickFilter('inactive')}
+          >
+            Inactive
+          </Button>
+        </Card.Body>
+      </Card>
+
+      <Card>
+        <Card.Body>
+          <Table hover>
+            <thead>
+              <tr>
+                <th>Product Name</th>
+                <th>SKU</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((product) => (
+                <tr key={product.prod_id}>
+                  <td>{product.prod_name}</td>
+                  <td>{product.sku}</td>
+                  <td>
+                    {product.is_parent === 'y' && <Badge bg="info">Parent</Badge>}
+                    {product.has_attributes === 'y' && <Badge bg="info">Attributes</Badge>}
+                  </td>
+                  <td>
+                    {product.inactive && product.inactive !== 'n' ? (
+                      <Badge bg="danger">Inactive</Badge>
+                    ) : (
+                      <Badge bg="success">Active</Badge>
+                    )}
+                  </td>
+                  <td>
+                    <Button
+                      variant="sm"
+                      onClick={() => router.push(`/dashboard/products/edit/${product.prod_id}`)}
+                    >
+                      <i className="fa fa-edit"></i>
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Card.Body>
+      </Card>
+    </Container>
   );
 }

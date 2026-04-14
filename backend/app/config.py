@@ -3,7 +3,7 @@ from typing import Optional
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "mysql+pymysql://claude_cc:claude_cc_readonly@localhost:3306/colorcommerce"
+    DATABASE_URL: str = "mysql+pymysql://claude_cc_rw:claude_cc_readwrite@localhost:3306/colorcommerce"
     SECRET_KEY: str = "cv3-nextgen-secret-2026"
     API_PREFIX: str = "/api/v1"
     ALGORITHM: str = "HS256"

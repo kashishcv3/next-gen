@@ -4,158 +4,178 @@ import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 import { useRouter, useParams } from 'next/navigation';
 
-interface GatewayPage {
-  id: string;
-  name: string;
-  url: string;
-  description: string;
-  status: string;
+interface FormData {
+  meta_name: string;
+  display_name: string;
+  meta_id: number;
+  destination: string;
 }
 
-export default function EditGatewayPagePage() {
+interface MetaOption {
+  id: number;
+  name: string;
+}
+
+export default function MetaGatewayEditPage() {
   const router = useRouter();
   const params = useParams();
-  const pageId = params.id as string;
-
-  const [formData, setFormData] = useState<GatewayPage>({
-    id: '',
-    name: '',
-    url: '',
-    description: '',
-    status: 'active',
-  });
+  const id = parseInt(params.id as string);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [metaLoading, setMetaLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [metaOptions, setMetaOptions] = useState<MetaOption[]>([]);
+  const [formData, setFormData] = useState<FormData>({
+    meta_name: '',
+    display_name: '',
+    meta_id: 0,
+    destination: '',
+  });
 
   useEffect(() => {
-    fetchPage();
-  }, [pageId]);
+    fetchMetaTags();
+    fetchGateway();
+  }, [id]);
 
-  const fetchPage = async () => {
+  const fetchMetaTags = async () => {
     try {
-      setLoading(true);
-      const response = await api.get(`/metagateway/${pageId}`);
-      setFormData(response.data.data);
+      const response = await api.get('/marketing/meta-tags?page=1&page_size=1000');
+      setMetaOptions(response.data.items.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+      })));
+    } catch (err) {
+      console.error('Failed to fetch meta tags:', err);
+    } finally {
+      setMetaLoading(false);
+    }
+  };
+
+  const fetchGateway = async () => {
+    try {
+      const response = await api.get(`/marketing/meta-gateways/${id}`);
+      setFormData({
+        meta_name: response.data.meta_name,
+        display_name: response.data.display_name,
+        meta_id: response.data.meta_id,
+        destination: response.data.destination,
+      });
       setError(null);
     } catch (err) {
-      console.error('Failed to fetch gateway page:', err);
-      setError('Failed to load gateway page');
+      console.error('Failed to fetch gateway:', err);
+      setError('Failed to load gateway');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: name === 'meta_id' ? parseInt(value) : value,
     }));
   };
 
-  const handleSave = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+
     try {
-      setSaving(true);
-      await api.put(`/metagateway/${pageId}`, formData);
-      router.push('/metagateway/list');
+      await api.put(`/marketing/meta-gateways/${id}`, formData);
+      router.push('/dashboard/metagateway/list');
     } catch (err) {
-      console.error('Failed to save gateway page:', err);
-      setError('Failed to save gateway page');
+      console.error('Failed to update gateway:', err);
+      setError('Failed to update gateway');
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
-    return <div className="alert alert-info">Loading gateway page...</div>;
+  if (loading || metaLoading) {
+    return <div className="alert alert-info">Loading...</div>;
   }
 
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
-      <h1>Edit Gateway Page</h1>
+      <h1>Edit Meta Gateway</h1>
 
       {error && <div className="alert alert-danger">{error}</div>}
 
-      <div className="row">
-        <div className="col-md-6">
-          <div className="panel panel-default">
-            <div className="panel-heading">
-              <h3 className="panel-title">Gateway Page Details</h3>
+      <form onSubmit={handleSubmit}>
+        <div className="panel panel-default">
+          <div className="panel-body">
+            <div className="form-group">
+              <label htmlFor="meta_name">Gateway Name</label>
+              <input
+                type="text"
+                className="form-control"
+                id="meta_name"
+                name="meta_name"
+                value={formData.meta_name}
+                onChange={handleChange}
+                required
+              />
             </div>
-            <div className="panel-body">
-              <div className="form-group">
-                <label htmlFor="name">Page Name</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  id="name"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleChange}
-                  disabled={saving}
-                />
-              </div>
 
-              <div className="form-group">
-                <label htmlFor="url">URL</label>
-                <input
-                  type="url"
-                  className="form-control"
-                  id="url"
-                  name="url"
-                  value={formData.url}
-                  onChange={handleChange}
-                  disabled={saving}
-                />
-              </div>
+            <div className="form-group">
+              <label htmlFor="display_name">Display Name</label>
+              <input
+                type="text"
+                className="form-control"
+                id="display_name"
+                name="display_name"
+                value={formData.display_name}
+                onChange={handleChange}
+                required
+              />
+            </div>
 
-              <div className="form-group">
-                <label htmlFor="description">Description</label>
-                <textarea
-                  className="form-control"
-                  id="description"
-                  name="description"
-                  rows={4}
-                  value={formData.description}
-                  onChange={handleChange}
-                  disabled={saving}
-                />
-              </div>
+            <div className="form-group">
+              <label htmlFor="meta_id">Meta Tag Set</label>
+              <select
+                className="form-control"
+                id="meta_id"
+                name="meta_id"
+                value={formData.meta_id}
+                onChange={handleChange}
+                required
+              >
+                <option value="">Select a meta tag set</option>
+                {metaOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-              <div className="form-group">
-                <label htmlFor="status">Status</label>
-                <select
-                  className="form-control"
-                  id="status"
-                  name="status"
-                  value={formData.status}
-                  onChange={handleChange}
-                  disabled={saving}
-                >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
-              </div>
+            <div className="form-group">
+              <label htmlFor="destination">Destination</label>
+              <input
+                type="text"
+                className="form-control"
+                id="destination"
+                name="destination"
+                value={formData.destination}
+                onChange={handleChange}
+                required
+              />
+            </div>
 
-              <div style={{ marginTop: '20px' }}>
-                <button className="btn btn-primary btn-lg" onClick={handleSave} disabled={saving}>
-                  <i className="fa fa-save"></i> Save Changes
-                </button>
-                <button
-                  className="btn btn-default btn-lg"
-                  onClick={() => router.back()}
-                  disabled={saving}
-                  style={{ marginLeft: '10px' }}
-                >
-                  <i className="fa fa-times"></i> Cancel
-                </button>
-              </div>
+            <div className="form-group">
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                <i className="fa fa-save"></i> Save Changes
+              </button>
+              <a href="/dashboard/metagateway/list" className="btn btn-default" style={{ marginLeft: '10px' }}>
+                Cancel
+              </a>
             </div>
           </div>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

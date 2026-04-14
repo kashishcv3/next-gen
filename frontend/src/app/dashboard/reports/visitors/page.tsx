@@ -4,148 +4,131 @@ import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
 interface VisitorData {
-  startdate: string;
-  enddate: string;
-  total_visits: number;
-  output: string;
+  date: string;
+  unique_visitors: number;
+  page_views: number;
+  sessions: number;
+}
+
+interface Report {
+  period: string;
+  total_visitors: number;
+  total_sessions: number;
+  total_pageviews: number;
+  data: VisitorData[];
 }
 
 export default function VisitorsPage() {
-  const [data, setData] = useState<VisitorData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [report, setReport] = useState<Report | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [period, setPeriod] = useState('month');
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    fetchReport();
+  }, [period]);
+
+  const fetchReport = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/reports/visitors', {
-        params: { startdate: startDate, enddate: endDate },
-      });
-      setData(response.data.data);
+      const response = await api.get(`/reports/visitors?period=${period}`);
+      setReport(response.data);
       setError(null);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load visitor data');
+    } catch (err) {
+      console.error('Failed to fetch visitors:', err);
+      setError('Failed to load visitors report');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div>
-      <div className="row">
-        <div className="col-lg-12">
-          <h1>Visit Graphs</h1>
-          <p>
-            <i className="fa fa-info-circle"></i> Use the following graphs to identify trends in your business.
-          </p>
-          <p>Please note that this report runs nightly and data from today may not be available until the following day.</p>
+    <div className="container-fluid" style={{ padding: '20px' }}>
+      <h1>Visitors Report</h1>
+
+      {/* Period Selection */}
+      <div className="panel panel-default" style={{ marginBottom: '20px' }}>
+        <div className="panel-body">
+          <div className="btn-group" role="group">
+            {['day', 'week', 'month', 'year'].map((p) => (
+              <button
+                key={p}
+                className={`btn ${period === p ? 'btn-primary' : 'btn-default'}`}
+                onClick={() => setPeriod(p)}
+              >
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-      <br />
 
-      <form onSubmit={handleSearch}>
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="well well-cv3-table">
-              <div className="table-responsive">
-                <table className="table cv3-data-table report-search">
-                  <thead>
-                    <tr>
-                      <th className="text-center" colSpan={3}>
-                        <b>Search by Date Range (mm/dd/yyyy):</b>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>
-                        From: <br />
-                        <input
-                          type="text"
-                          className="form-control form-control-inline"
-                          value={startDate}
-                          onChange={(e) => setStartDate(e.target.value)}
-                          placeholder="MM/DD/YYYY"
-                        />
-                      </td>
-                      <td>
-                        To: <br />
-                        <input
-                          type="text"
-                          className="form-control form-control-inline"
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
-                          placeholder="MM/DD/YYYY"
-                        />
-                      </td>
-                      <td align="center">
-                        <br />
-                        <button type="submit" className="btn btn-primary">
-                          Modify Graphs
-                        </button>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+      {error && <div className="alert alert-danger">{error}</div>}
+      {loading && <div className="alert alert-info">Loading report...</div>}
+
+      {!loading && report && (
+        <>
+          {/* Summary Stats */}
+          <div className="row" style={{ marginBottom: '20px' }}>
+            <div className="col-md-4">
+              <div className="panel panel-default">
+                <div className="panel-body">
+                  <h4>Total Visitors</h4>
+                  <h2>{report.total_visitors}</h2>
+                </div>
+              </div>
+            </div>
+            <div className="col-md-4">
+              <div className="panel panel-default">
+                <div className="panel-body">
+                  <h4>Total Sessions</h4>
+                  <h2>{report.total_sessions}</h2>
+                </div>
+              </div>
+            </div>
+            <div className="col-md-4">
+              <div className="panel panel-default">
+                <div className="panel-body">
+                  <h4>Total Page Views</h4>
+                  <h2>{report.total_pageviews}</h2>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </form>
 
-      {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
+          {/* Detailed Data */}
+          <div className="panel panel-default">
+            <div className="panel-heading">
+              <h3 className="panel-title">Daily Breakdown</h3>
+            </div>
+            <div className="table-responsive">
+              <table className="table table-striped table-hover">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Unique Visitors</th>
+                    <th>Sessions</th>
+                    <th>Page Views</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.data.map((row, index) => (
+                    <tr key={index}>
+                      <td>{row.date}</td>
+                      <td>{row.unique_visitors}</td>
+                      <td>{row.sessions}</td>
+                      <td>{row.page_views}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
-      {loading && (
-        <div className="row">
-          <div className="col-lg-12">
-            <p>Loading visitor graphs...</p>
-          </div>
-        </div>
-      )}
-
-      {data && data.output === 'y' && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div align="center">
-              <b>Visit Graphs for {data.startdate} to {data.enddate}</b>
-              <br />
-              Total Visits for date range: {data.total_visits}
-              <br />
-            </div>
-            <br />
-            <div className="well well-cv3-table">
-              <div className="panel panel-default">
-                <div className="panel-heading">Visits Per Day</div>
-                <div className="panel-body text-center">
-                  <p>[Chart Placeholder: Visits Per Day Graph]</p>
-                </div>
-              </div>
-              <br />
-              <div className="panel panel-default">
-                <div className="panel-heading">Visits By Day of Week</div>
-                <div className="panel-body text-center">
-                  <p>[Chart Placeholder: Visits By Day of Week Graph]</p>
-                </div>
-              </div>
-              <br />
-              <div className="panel panel-default">
-                <div className="panel-heading">Visits By Month</div>
-                <div className="panel-body text-center">
-                  <p>[Chart Placeholder: Visits By Month Graph]</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+      {!loading && report && report.data.length === 0 && (
+        <div className="alert alert-info">No visitor data for the selected period.</div>
       )}
     </div>
   );

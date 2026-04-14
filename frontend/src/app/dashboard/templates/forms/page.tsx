@@ -1,120 +1,132 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { Container, Row, Col, Button, Table, Alert, Spinner, Card, Badge } from 'react-bootstrap';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import Link from 'next/link';
 
-interface Item {
-  id: string;
+interface Form {
+  id: number;
   name: string;
-  status?: string;
-  created_at?: string;
+  form_type: string;
+  description: string;
+  last_modified: string;
 }
 
-export default function ListPage() {
-  const [items, setItems] = useState<Item[]>([]);
+export default function TemplateFormsPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [forms, setForms] = useState<Form[]>([]);
 
   useEffect(() => {
-    fetchItems();
+    fetchForms();
   }, []);
 
-  const fetchItems = async (searchTerm?: string) => {
+  const fetchForms = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('search', searchTerm);
-
-      const response = await api.get(`/templates/forms?${params.toString()}`);
-      setItems(response.data.data || []);
+      setError(null);
+      const response = await api.get('/templates/forms');
+      setForms(response.data.forms || []);
     } catch (err) {
-      console.error('Error:', err);
-      setError('Failed to load items');
+      setError(err instanceof Error ? err.message : 'Failed to fetch forms');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSearch = () => {
-    fetchItems(search);
-  };
-
-  const formatDate = (dateString: string) => {
-    try {
-      return new Date(dateString).toLocaleDateString();
-    } catch {
-      return dateString;
-    }
-  };
-
-  if (loading) return <div className="alert alert-info">Loading...</div>;
-  if (error) return <div className="alert alert-danger">{error}</div>;
+  if (loading) {
+    return (
+      <Container className="mt-4" fluid>
+        <Spinner animation="border" />
+      </Container>
+    );
+  }
 
   return (
-    <div className="container-fluid" style={{ padding: '20px'}}>
-      <h1>Template Forms</h1>
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
+          <h1>Template Forms</h1>
+        </Col>
+        <Col xs="auto">
+          <Button
+            variant="success"
+            onClick={() => router.push('/dashboard/templates/forms/add')}
+          >
+            <i className="fa fa-plus"></i> Add Form
+          </Button>{' '}
+          <Button variant="primary" onClick={() => router.push('/dashboard/templates/list')}>
+            <i className="fa fa-arrow-left"></i> Back to Templates
+          </Button>
+        </Col>
+      </Row>
 
-      <div className="panel panel-default" style={{ marginBottom: '20px'}}>
-        <div className="panel-body">
-          <div className="row">
-            <div className="col-md-6">
-              <input
-                type="text"
-                className="form-control"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search..."
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              />
-            </div>
-            <div className="col-md-6">
-              <button className="btn btn-primary" onClick={handleSearch}>
-                <i className="fa fa-search"></i> Search
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      {error && <Alert variant="danger">{error}</Alert>}
 
-      <div className="panel panel-default">
-        <div className="panel-heading">
-          <h3 className="panel-title">Items ({items.length})</h3>
-        </div>
-        {items.length > 0 ? (
-          <div className="table-responsive">
-            <table className="table table-striped table-hover">
+      <Card>
+        <Card.Body>
+          {forms.length === 0 ? (
+            <Alert variant="info">No forms found</Alert>
+          ) : (
+            <Table hover>
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th style={{ width: '120px'}}>Actions</th>
+                  <th>Form Name</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                  <th>Last Modified</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.name}</td>
-                    <td>{item.status || 'N/A'}</td>
-                    <td>{item.created_at ? formatDate(item.created_at) : 'N/A'}</td>
+                {forms.map((form) => (
+                  <tr key={form.id}>
+                    <td>{form.name}</td>
                     <td>
-                      <Link href={`/templates/forms/view/${item.id}`} className="btn btn-xs btn-primary">
-                        View
-                      </Link>
+                      <Badge bg="info">{form.form_type}</Badge>
+                    </td>
+                    <td>{form.description}</td>
+                    <td>{form.last_modified}</td>
+                    <td>
+                      <Button
+                        variant="sm"
+                        className="me-1"
+                        onClick={() =>
+                          router.push(`/dashboard/templates/forms/edit/${form.id}`)
+                        }
+                      >
+                        <i className="fa fa-edit"></i>
+                      </Button>
+                      <Button
+                        variant="sm"
+                        variant="danger"
+                        onClick={() => {
+                          if (confirm('Are you sure?')) {
+                            deleteForm(form.id);
+                          }
+                        }}
+                      >
+                        <i className="fa fa-trash"></i>
+                      </Button>
                     </td>
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="panel-body">
-            <p>No items found.</p>
-          </div>
-        )}
-      </div>
-    </div>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+    </Container>
   );
 }
+
+const deleteForm = async (formId: number) => {
+  try {
+    await api.delete(`/templates/forms/${formId}`);
+    window.location.reload();
+  } catch (err) {
+    console.error('Failed to delete form');
+  }
+};

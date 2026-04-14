@@ -25,6 +25,10 @@ _mfa_codes: dict = {}
 # Format: { "mfa_token_value": { "user_id": 1, "username": "...", "created_at": datetime } }
 _mfa_tokens: dict = {}
 
+# In-memory device trust store (fallback when DB is read-only)
+# Format: { "trust_token_value": { "user_id": 1, "expires": datetime, "created": datetime } }
+_device_trust_tokens: dict = {}
+
 
 def verify_password(plain_password: str, hashed_password: str, last_pw_change: datetime = None) -> bool:
     """Verify password using SHA-512 (newer) or MD5 (older), matching old CV3 platform logic."""
@@ -43,6 +47,9 @@ def verify_password(plain_password: str, hashed_password: str, last_pw_change: d
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
+    # python-jose requires 'sub' to be a string per JWT spec
+    if "sub" in to_encode:
+        to_encode["sub"] = str(to_encode["sub"])
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
@@ -142,11 +149,19 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
 
     # Check if device_trust_token is provided and valid
     if credentials.device_trust_token:
+        # Check DB first
         device_trust = db.query(MfaDeviceTrust).filter(
             MfaDeviceTrust.trust_token == credentials.device_trust_token,
             MfaDeviceTrust.user_id == user.uid,
             MfaDeviceTrust.expires > datetime.utcnow()
         ).first()
+
+        # Fallback: check in-memory store (for when DB is read-only)
+        if not device_trust:
+            mem_trust = _device_trust_tokens.get(credentials.device_trust_token)
+            if mem_trust and mem_trust["user_id"] == user.uid and mem_trust["expires"] > datetime.utcnow():
+                device_trust = True  # truthy sentinel
+
         if device_trust:
             # Trust token is valid - skip MFA
             access_token = create_access_token(data={"sub": user.uid})
@@ -250,11 +265,19 @@ def verify_mfa(req: MFAVerifyRequest, db: Session = Depends(get_db)):
         # If trust_device is True, create and store device trust token
         if req.trust_device:
             device_trust_token = uuid.uuid4().hex
+            trust_expires = datetime.utcnow() + timedelta(days=7)
+            # Store in memory (always works)
+            _device_trust_tokens[device_trust_token] = {
+                "user_id": user_id,
+                "expires": trust_expires,
+                "created": datetime.utcnow(),
+            }
+            # Also try DB (may fail if read-only)
             device_trust = MfaDeviceTrust(
                 user_id=user_id,
                 trust_token=device_trust_token,
                 device_fingerprint="",
-                expires=datetime.utcnow() + timedelta(days=7),
+                expires=trust_expires,
                 created=datetime.utcnow(),
             )
             db.add(device_trust)

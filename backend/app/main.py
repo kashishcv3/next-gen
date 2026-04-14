@@ -17,6 +17,9 @@ from app.routers import (
     shipping,
     wholesale,
     master_list,
+    mainpage,
+    admin_tools,
+    tax,
 )
 
 app = FastAPI(
@@ -48,6 +51,9 @@ app.include_router(marketing.router, prefix=settings.API_PREFIX)
 app.include_router(shipping.router, prefix=settings.API_PREFIX)
 app.include_router(wholesale.router, prefix=settings.API_PREFIX)
 app.include_router(master_list.router, prefix=settings.API_PREFIX)
+app.include_router(mainpage.router, prefix=settings.API_PREFIX)
+app.include_router(admin_tools.router, prefix=settings.API_PREFIX)
+app.include_router(tax.router, prefix=settings.API_PREFIX)
 
 
 @app.get("/")

@@ -3,18 +3,39 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
 
 interface SidebarSection {
   title: string;
   id: string;
+  collapsible?: boolean;
   items: { label: string; href: string; subItems?: { label: string; href: string }[] }[];
 }
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { user } = useAuth();
+
+  // Determine if we are in the "bigadmin" section (matches old platform template_section="bigadmin")
+  const isBigadminSection = pathname.includes('/master-list') ||
+    pathname.includes('/store-move') ||
+    pathname.includes('/store-blastqueue') ||
+    pathname.includes('/store-who-where') ||
+    pathname.includes('/store-contracts') ||
+    pathname.includes('/store-storeoptions') ||
+    pathname.includes('/store-loginpagemessages') ||
+    pathname.includes('/store-benchmark-exclude') ||
+    pathname.includes('/store-block-list') ||
+    pathname.includes('/help-manuals') ||
+    pathname.includes('/training-videos') ||
+    pathname.includes('/account-create');
+
+  const isBigadmin = user?.user_type === 'bigadmin';
+  const isBigadminLimit = user?.user_type === 'bigadmin_limit';
 
   // Determine which sidebar section to show based on pathname
   const getActiveSection = () => {
+    if (isBigadminSection && (isBigadmin || isBigadminLimit)) return 'bigadmin';
     if (pathname.includes('/products') || pathname.includes('/categories') || pathname.includes('/templates') || pathname.includes('/images') || pathname.includes('/files') || pathname.includes('/recipes') || pathname.includes('/styles') || pathname.includes('/vendors')) return 'content';
     if (pathname.includes('/orders') || pathname.includes('/customers') || pathname.includes('/shipping') || pathname.includes('/tax') || pathname.includes('/wholesale') || pathname.includes('/customer-groups') || pathname.includes('/rewards')) return 'orders';
     if (pathname.includes('/marketing') || pathname.includes('/campaigns') || pathname.includes('/meta') || pathname.includes('/promos') || pathname.includes('/metagateway')) return 'marketing';
@@ -24,11 +45,45 @@ export default function Sidebar() {
 
   const section = getActiveSection();
 
+  // Bigadmin section - matches old platform sidenav_main_bootstrap.tpl lines 28-51
+  const bigadminItems: { label: string; href: string }[] = [];
+
+  // Both bigadmin and bigadmin_limit get these
+  if (isBigadmin || isBigadminLimit) {
+    bigadminItems.push({ label: 'New Developer', href: '/dashboard/account-create' });
+    bigadminItems.push({ label: 'Move Store', href: '/dashboard/store-move' });
+  }
+
+  // bigadmin only (not bigadmin_limit) gets these additional items
+  if (isBigadmin) {
+    bigadminItems.push({ label: 'Blast Queue', href: '/dashboard/store-blastqueue' });
+    bigadminItems.push({ label: 'Who Where', href: '/dashboard/store-who-where' });
+    bigadminItems.push({ label: 'Store Contracts', href: '/dashboard/store-contracts' });
+    bigadminItems.push({ label: 'Store Options', href: '/dashboard/store-storeoptions' });
+    bigadminItems.push({ label: 'Admin Messages', href: '/dashboard/store-loginpagemessages' });
+    bigadminItems.push({ label: 'Benchmark Exclude', href: '/dashboard/store-benchmark-exclude' });
+    bigadminItems.push({ label: 'Block List', href: '/dashboard/store-block-list' });
+    bigadminItems.push({ label: 'Help Manuals', href: '/dashboard/help-manuals' });
+    bigadminItems.push({ label: 'Training Videos', href: '/dashboard/training-videos' });
+  }
+
+  // All bigadmin users get Preferences
+  bigadminItems.push({ label: 'Preferences', href: '/dashboard/preferences' });
+
+  const bigadminSections: SidebarSection[] = [
+    {
+      title: 'Main',
+      id: 'menu-bigadmin',
+      collapsible: false,
+      items: bigadminItems,
+    },
+  ];
+
   const mainSections: SidebarSection[] = [
-    { title: 'Main', id: 'menu-main', items: [
+    { title: 'Main', id: 'menu-main', collapsible: false, items: [
       { label: 'Dashboard', href: '/dashboard' },
       { label: 'My Account', href: '/dashboard/account' },
-      { label: 'Preferences', href: '/dashboard/settings/general' },
+      { label: 'Preferences', href: '/dashboard/preferences' },
     ]},
   ];
 
@@ -128,6 +183,7 @@ export default function Sidebar() {
 
   let sections: SidebarSection[];
   switch (section) {
+    case 'bigadmin': sections = bigadminSections; break;
     case 'content': sections = contentSections; break;
     case 'orders': sections = ordersSections; break;
     case 'marketing': sections = marketingSections; break;
@@ -146,7 +202,32 @@ export default function Sidebar() {
 
 function SidebarGroup({ section, pathname }: { section: SidebarSection; pathname: string }) {
   const hasActiveItem = section.items.some(item => pathname === item.href || pathname.startsWith(item.href + '/'));
-  const [isOpen, setIsOpen] = useState(hasActiveItem);
+  const [isOpen, setIsOpen] = useState(section.collapsible === false ? true : hasActiveItem);
+
+  // For non-collapsible sections (like bigadmin "Main"), render items directly
+  if (section.collapsible === false) {
+    return (
+      <>
+        <li className="active">
+          <a
+            href="#"
+            onClick={(e) => { e.preventDefault(); setIsOpen(!isOpen); }}
+            data-toggle="collapse"
+            data-target={`#${section.id}`}
+          >
+            {section.title} <i className={`fa fa-caret-${isOpen ? 'down' : 'right'}`} style={{ float: 'right', marginTop: '4px' }}></i>
+          </a>
+          <ul className={`collapse ${isOpen ? 'in' : ''}`} id={section.id}>
+            {section.items.map((item) => (
+              <li key={item.href} className={pathname === item.href || pathname.startsWith(item.href + '/') || pathname.startsWith(item.href + '?') ? 'active' : ''}>
+                <Link href={item.href}>{item.label}</Link>
+              </li>
+            ))}
+          </ul>
+        </li>
+      </>
+    );
+  }
 
   return (
     <li className={hasActiveItem ? 'active' : ''}>

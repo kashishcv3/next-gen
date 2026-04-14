@@ -92,7 +92,9 @@ export function logout(): void {
   Cookies.remove(TOKEN_KEY);
   Cookies.remove(USER_KEY);
   Cookies.remove(MFA_TOKEN_KEY);
-  Cookies.remove(MFA_DEVICE_TRUST_KEY);
+  // NOTE: Do NOT remove MFA_DEVICE_TRUST_KEY here — the device trust cookie
+  // should persist across logouts so the user isn't prompted for MFA again
+  // within the 7-day window.
 }
 
 export function getToken(): string | null {

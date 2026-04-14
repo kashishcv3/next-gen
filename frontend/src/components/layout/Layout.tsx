@@ -2,7 +2,6 @@
 
 import React, { ReactNode } from 'react';
 import Header from './Header';
-import Sidebar from './Sidebar';
 import Footer from './Footer';
 
 interface LayoutProps {
@@ -13,8 +12,8 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <>
       <div id="wrapper">
+        {/* Header includes Sidebar inside the navbar collapse div, matching old platform structure */}
         <Header />
-        <Sidebar />
         <div id="page-wrapper">
           {children}
           <br /><br /><br />

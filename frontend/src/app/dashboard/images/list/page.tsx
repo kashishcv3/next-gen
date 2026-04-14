@@ -1,78 +1,153 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { Container, Row, Col, Button, Alert, Spinner, Card, Form, Badge, Table } from 'react-bootstrap';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import Link from 'next/link';
 
-interface Item {
-  id: string;
-  name?: string;
-  title?: string;
-  status?: string;
-  created_at?: string;
+interface Image {
+  id: number;
+  filename: string;
+  file_size: number;
+  upload_date: string;
+  width: number;
+  height: number;
 }
 
-export default function ListPage() {
-  const [items, setItems] = useState<Item[]>([]);
+export default function ImagesListPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [images, setImages] = useState<Image[]>([]);
+  const [filter, setFilter] = useState('all');
 
-  useEffect(() => { fetchItems(); }, []);
+  useEffect(() => {
+    fetchImages();
+  }, [filter]);
 
-  const fetchItems = async (searchTerm?: string) => {
+  const fetchImages = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('search', searchTerm);
-      const response = await api.get(`/images?${params.toString()}`);
-      setItems(response.data.data || []);
+      setError(null);
+      const response = await api.get('/images/list', {
+        params: { filter },
+      });
+      setImages(response.data.images || []);
     } catch (err) {
-      console.error('Error:', err);
-      setError('Failed to load');
+      setError(err instanceof Error ? err.message : 'Failed to fetch images');
     } finally {
       setLoading(false);
     }
   };
 
-  const formatDate = (dateString: string) => {
-    try { return new Date(dateString).toLocaleDateString(); } catch { return dateString; }
-  };
-
-  if (loading) return <div className="alert alert-info">Loading...</div>;
-  if (error) return <div className="alert alert-danger">{error}</div>;
+  if (loading) {
+    return (
+      <Container className="mt-4" fluid>
+        <Spinner animation="border" />
+      </Container>
+    );
+  }
 
   return (
-    <div className="container-fluid" style={{ padding: '20px'}}>
-      <h1>Images</h1>
-      <div className="panel panel-default" style={{ marginBottom: '20px'}}>
-        <div className="panel-body">
-          <input
-            type="text"
-            className="form-control"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search..."
-            onKeyPress={(e) => e.key === 'Enter' && fetchItems(search)}
-          />
-          <button className="btn btn-primary" onClick={() => fetchItems(search)} style={{ marginTop: '10px'}}>
-            <i className="fa fa-search"></i> Search
-          </button>
-        </div>
-      </div>
-      <div className="panel panel-default">
-        <div className="panel-heading"><h3 className="panel-title">Items</h3></div>
-        {items.length > 0 ? (
-          <div className="table-responsive">
-            <table className="table table-striped">
-              <thead><tr><th>Name</th><th>Status</th><th>Created</th><th style={{ width: '100px'}}>Action</th></tr></thead>
-              <tbody>{items.map(item => (<tr key={item.id}><td>{item.name || item.title}</td><td>{item.status || 'N/A'}</td><td>{item.created_at ? formatDate(item.created_at) : 'N/A'}</td><td><Link href={`/images/${item.id}`} className="btn btn-xs btn-primary">View</Link></td></tr>))}</tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="panel-body"><p>No items found.</p></div>
-        )}
-      </div>
-    </div>
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
+          <h1>Image Library</h1>
+        </Col>
+        <Col xs="auto">
+          <Button
+            variant="success"
+            onClick={() => router.push('/dashboard/images/upload')}
+          >
+            <i className="fa fa-upload"></i> Upload Images
+          </Button>{' '}
+          <Button variant="info" onClick={() => router.push('/dashboard/images/organize')}>
+            <i className="fa fa-folder"></i> Organize
+          </Button>
+        </Col>
+      </Row>
+
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      <Card className="mb-4">
+        <Card.Body>
+          <Form.Group>
+            <Form.Label>Filter Images</Form.Label>
+            <Form.Select value={filter} onChange={(e) => setFilter(e.target.value)}>
+              <option value="all">All Images</option>
+              <option value="unused">Unused Images</option>
+              <option value="products">Product Images</option>
+              <option value="categories">Category Images</option>
+              <option value="templates">Template Images</option>
+            </Form.Select>
+          </Form.Group>
+        </Card.Body>
+      </Card>
+
+      <Card>
+        <Card.Body>
+          {images.length === 0 ? (
+            <Alert variant="info">No images found</Alert>
+          ) : (
+            <Table hover>
+              <thead>
+                <tr>
+                  <th>Filename</th>
+                  <th>Size</th>
+                  <th>Dimensions</th>
+                  <th>Upload Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {images.map((image) => (
+                  <tr key={image.id}>
+                    <td>
+                      <i className="fa fa-image"></i> {image.filename}
+                    </td>
+                    <td>{(image.file_size / 1024).toFixed(2)} KB</td>
+                    <td>
+                      {image.width}x{image.height}
+                    </td>
+                    <td>{image.upload_date}</td>
+                    <td>
+                      <Button
+                        variant="sm"
+                        className="me-1"
+                        onClick={() =>
+                          router.push(`/dashboard/images/edit/${image.id}`)
+                        }
+                      >
+                        <i className="fa fa-edit"></i>
+                      </Button>
+                      <Button
+                        variant="sm"
+                        variant="danger"
+                        onClick={() => {
+                          if (confirm('Are you sure?')) {
+                            deleteImage(image.id);
+                          }
+                        }}
+                      >
+                        <i className="fa fa-trash"></i>
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+    </Container>
   );
 }
+
+const deleteImage = async (imageId: number) => {
+  try {
+    await api.delete(`/images/${imageId}`);
+    window.location.reload();
+  } catch (err) {
+    console.error('Failed to delete image');
+  }
+};

@@ -3,21 +3,22 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-export default function StoreGoogleBasePage() {
-  const [data, setData] = useState<any>(null);
+export default function GoogleBasePage() {
+  const [configs, setConfigs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [siteId, setSiteId] = useState('1');
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    fetchConfigs();
+  }, [siteId]);
 
-  const fetchData = async () => {
+  const fetchConfigs = async () => {
     try {
-      const res = await api.get('/store/google-base');
-      setData(res.data.data);
+      const res = await api.get(`/stores/google-base/${siteId}`);
+      setConfigs(res.data.configs || []);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load Google Base data');
+      setError(err.response?.data?.message || 'Failed to load Google Shopping configs');
     } finally {
       setLoading(false);
     }
@@ -27,30 +28,38 @@ export default function StoreGoogleBasePage() {
     <div>
       <div className="row">
         <div className="col-lg-12">
-          <h1>Google Base</h1>
-          <p><i className="fa fa-info-circle"></i> Manage Google Base feed settings.</p>
+          <h1>Google Shopping</h1>
+          <p><i className="fa fa-info-circle"></i> Configure Google Shopping and Merchant Center integration.</p>
         </div>
       </div>
       <br />
 
       {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger">{error}</div></div></div>}
 
-      {!loading && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="panel panel-primary">
-              <div className="panel-heading">
-                <h3 className="panel-title"><i className="fa fa-google"></i> Google Base Settings</h3>
-              </div>
-              <div className="panel-body">
-                <p>Google Base configuration and feed management tools are available here.</p>
-              </div>
+      <div className="row">
+        <div className="col-lg-8">
+          <div className="panel panel-default">
+            <div className="panel-heading">
+              <h3 className="panel-title"><i className="fa fa-google"></i> Google Shopping Integration</h3>
+            </div>
+            <div className="panel-body">
+              {configs.length > 0 ? (
+                configs.map(config => (
+                  <div key={config.id} className="well">
+                    <h4>Merchant ID: {config.merchant_id}</h4>
+                    <p>Email: {config.account_email}</p>
+                    <p>Feed URL: <code>{config.feed_url}</code></p>
+                    <p>Status: {config.is_active ? <span className="label label-success">Active</span> : <span className="label label-danger">Inactive</span>}</p>
+                    <button className="btn btn-primary"><i className="fa fa-edit"></i> Edit</button>
+                  </div>
+                ))
+              ) : (
+                <p>No Google Shopping configuration found. <button className="btn btn-primary"><i className="fa fa-plus"></i> Add Configuration</button></p>
+              )}
             </div>
           </div>
         </div>
-      )}
-
-      {loading && <div className="row"><div className="col-lg-12"><p>Loading...</p></div></div>}
+      </div>
     </div>
   );
 }

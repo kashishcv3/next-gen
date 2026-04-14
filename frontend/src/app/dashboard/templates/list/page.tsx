@@ -1,133 +1,137 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { Container, Row, Col, Button, Table, Alert, Spinner, Card, Badge, Tabs, Tab } from 'react-bootstrap';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import Link from 'next/link';
 
 interface Template {
-  id: string;
+  id: number;
   name: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
+  template_type: string;
+  last_modified: string;
 }
 
-export default function TemplateListPage() {
-  const [templates, setTemplates] = useState<Template[]>([]);
+export default function TemplatesListPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [templates, setTemplates] = useState<Record<string, Template[]>>({});
+  const [activeTab, setActiveTab] = useState('html');
 
   useEffect(() => {
     fetchTemplates();
   }, []);
 
-  const fetchTemplates = async (searchTerm?: string) => {
+  const fetchTemplates = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('search', searchTerm);
-
-      const response = await api.get(`/templates?${params.toString()}`);
-      setTemplates(response.data.data || []);
+      setError(null);
+      const response = await api.get('/templates/list');
+      setTemplates(response.data.templates || {});
     } catch (err) {
-      console.error('Error:', err);
-      setError('Failed to load templates');
+      setError(err instanceof Error ? err.message : 'Failed to fetch templates');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSearch = () => {
-    fetchTemplates(search);
-  };
+  if (loading) {
+    return (
+      <Container className="mt-4" fluid>
+        <Spinner animation="border" />
+      </Container>
+    );
+  }
 
-  const formatDate = (dateString: string) => {
-    try {
-      return new Date(dateString).toLocaleDateString();
-    } catch {
-      return dateString;
-    }
-  };
-
-  if (loading) return <div className="alert alert-info">Loading...</div>;
-  if (error) return <div className="alert alert-danger">{error}</div>;
+  const templateTypes = Object.keys(templates);
 
   return (
-    <div className="container-fluid" style={{ padding: '20px' }}>
-      <h1>Templates</h1>
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
+          <h1>Template Library</h1>
+        </Col>
+        <Col xs="auto">
+          <Button
+            variant="success"
+            onClick={() => router.push('/dashboard/templates/add')}
+          >
+            <i className="fa fa-plus"></i> Add Template
+          </Button>{' '}
+          <Button variant="primary" onClick={() => router.push('/dashboard/templates/tags')}>
+            <i className="fa fa-tag"></i> Tags
+          </Button>{' '}
+          <Button variant="primary" onClick={() => router.push('/dashboard/templates/forms')}>
+            <i className="fa fa-list"></i> Forms
+          </Button>
+        </Col>
+      </Row>
 
-      <div className="panel panel-default" style={{ marginBottom: '20px' }}>
-        <div className="panel-body">
-          <div className="row">
-            <div className="col-md-6">
-              <input
-                type="text"
-                className="form-control"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search templates..."
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              />
-            </div>
-            <div className="col-md-6">
-              <button className="btn btn-primary" onClick={handleSearch}>
-                <i className="fa fa-search"></i> Search
-              </button>
-              <Link href="/templates/add" className="btn btn-success" style={{ marginLeft: '5px' }}>
-                <i className="fa fa-plus"></i> Add Template
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
+      {error && <Alert variant="danger">{error}</Alert>}
 
-      <div className="panel panel-default">
-        <div className="panel-heading">
-          <h3 className="panel-title">Templates ({templates.length})</h3>
-        </div>
-        {templates.length > 0 ? (
-          <div className="table-responsive">
-            <table className="table table-striped table-hover">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th>Updated</th>
-                  <th style={{ width: '150px' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {templates.map((template) => (
-                  <tr key={template.id}>
-                    <td>{template.name}</td>
-                    <td>
-                      <span className={`label label-${template.status === 'published' ? 'success' : 'warning'}`}>
-                        {template.status}
-                      </span>
-                    </td>
-                    <td>{formatDate(template.created_at)}</td>
-                    <td>{formatDate(template.updated_at)}</td>
-                    <td>
-                      <Link href={`/templates/edit/${template.id}`} className="btn btn-xs btn-warning">
-                        Edit
-                      </Link>
-                      <Link href={`/templates/delete/${template.id}`} className="btn btn-xs btn-danger" style={{ marginLeft: '3px' }}>
-                        Delete
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="panel-body">
-            <p>No templates found.</p>
-          </div>
-        )}
-      </div>
-    </div>
+      <Card>
+        <Card.Body>
+          <Tabs id="template-tabs" activeKey={activeTab} onSelect={(k) => setActiveTab(k || 'html')}>
+            {templateTypes.map((type) => (
+              <Tab eventKey={type} title={type} key={type}>
+                <Table hover className="mt-3">
+                  <thead>
+                    <tr>
+                      <th>Template Name</th>
+                      <th>Type</th>
+                      <th>Last Modified</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {templates[type].map((template) => (
+                      <tr key={template.id}>
+                        <td>{template.name}</td>
+                        <td>
+                          <Badge bg="info">{template.template_type}</Badge>
+                        </td>
+                        <td>{template.last_modified}</td>
+                        <td>
+                          <Button
+                            variant="sm"
+                            className="me-1"
+                            onClick={() =>
+                              router.push(`/dashboard/templates/edit/${template.id}`)
+                            }
+                          >
+                            <i className="fa fa-edit"></i>
+                          </Button>
+                          <Button
+                            variant="sm"
+                            variant="danger"
+                            onClick={() => {
+                              if (confirm('Are you sure?')) {
+                                deleteTemplate(template.id);
+                              }
+                            }}
+                          >
+                            <i className="fa fa-trash"></i>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </Tab>
+            ))}
+          </Tabs>
+        </Card.Body>
+      </Card>
+    </Container>
   );
 }
+
+const deleteTemplate = async (templateId: number) => {
+  try {
+    await api.delete(`/templates/${templateId}`);
+    window.location.reload();
+  } catch (err) {
+    console.error('Failed to delete template');
+  }
+};

@@ -1,219 +1,163 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { Container, Row, Col, Button, Table, Alert, Spinner, Card, Badge, Form } from 'react-bootstrap';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import Link from 'next/link';
 
-interface SearchResult {
-  id: string;
-  name: string;
+interface Product {
+  prod_id: number;
   sku: string;
-  price: string;
+  prod_name: string;
+  is_parent: string;
+  parent: number;
+  inactive: string;
+  ext_id: string;
 }
 
 export default function ProductSearchPage() {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [matchType, setMatchType] = useState('name');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searched, setSearched] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [limit, setLimit] = useState(50);
+  const [hasSearched, setHasSearched] = useState(false);
 
-  const handleSearch = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setSearched(true);
+    if (!searchQuery.trim()) {
+      setError('Please enter a search term');
+      return;
+    }
 
     try {
+      setLoading(true);
+      setError(null);
       const response = await api.get('/products/search', {
         params: {
           q: searchQuery,
-          type: matchType,
+          limit: limit,
         },
       });
-      setResults(response.data.data || []);
+      setProducts(response.data.results || []);
+      setHasSearched(true);
     } catch (err) {
-      console.error('Search failed:', err);
-      setError('Search failed');
-      setResults([]);
+      setError(err instanceof Error ? err.message : 'Failed to search products');
+      setProducts([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleExportCSV = () => {
-    if (results.length === 0) return;
-
-    const headers = ['ID', 'Name', 'SKU', 'Price'];
-    const rows = results.map(p => [p.id, p.name, p.sku, p.price]);
-
-    let csv = headers.join(',') + '\n';
-    rows.forEach(row => {
-      csv += row.map(val => `"${val}"`).join(',') + '\n';
-    });
-
-    const element = document.createElement('a');
-    element.setAttribute('href', 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv));
-    element.setAttribute('download', 'product-search-results.csv');
-    element.style.display = 'none';
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
-  };
-
   return (
-    <div>
-      <div className="row">
-        <div className="col-lg-12">
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
           <h1>Search Products</h1>
-          <p>
-            <i className="fa fa-search"></i> Search for products by name, SKU, or alternate ID.
-          </p>
-        </div>
-      </div>
-      <br />
+        </Col>
+        <Col xs="auto">
+          <Button variant="primary" onClick={() => router.push('/dashboard/products/list')}>
+            <i className="fa fa-sitemap"></i> By Category
+          </Button>{' '}
+          <Button variant="primary" onClick={() => router.push('/dashboard/products/by-name')}>
+            <i className="fa fa-list"></i> By Name
+          </Button>
+        </Col>
+      </Row>
 
-      {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
-          </div>
-        </div>
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      <Card className="mb-4">
+        <Card.Body>
+          <Form onSubmit={handleSearch}>
+            <Form.Group className="mb-3">
+              <Form.Label>Search by Name, SKU, or Alt ID</Form.Label>
+              <Form.Control
+                type="text"
+                placeholder="Enter search term..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </Form.Group>
+
+            <Form.Group className="mb-3">
+              <Form.Label>Limit Results</Form.Label>
+              <Form.Select
+                value={limit}
+                onChange={(e) => setLimit(parseInt(e.target.value))}
+              >
+                <option value={10}>10 results</option>
+                <option value={25}>25 results</option>
+                <option value={50}>50 results</option>
+                <option value={100}>100 results</option>
+                <option value={500}>500 results</option>
+              </Form.Select>
+            </Form.Group>
+
+            <Button variant="primary" type="submit" disabled={loading}>
+              {loading && <Spinner animation="border" size="sm" className="me-2" />}
+              Search
+            </Button>
+          </Form>
+        </Card.Body>
+      </Card>
+
+      {hasSearched && (
+        <Card>
+          <Card.Body>
+            {products.length === 0 ? (
+              <Alert variant="info">No products found</Alert>
+            ) : (
+              <>
+                <p className="text-muted">Found {products.length} product(s)</p>
+                <Table hover>
+                  <thead>
+                    <tr>
+                      <th>Product Name</th>
+                      <th>SKU</th>
+                      <th>Alt ID</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.map((product) => (
+                      <tr key={product.prod_id}>
+                        <td>{product.prod_name}</td>
+                        <td>{product.sku}</td>
+                        <td>{product.ext_id}</td>
+                        <td>
+                          {product.is_parent === 'y' && <Badge bg="info">Parent</Badge>}
+                          {product.parent && <Badge bg="warning">Child</Badge>}
+                        </td>
+                        <td>
+                          {product.inactive && product.inactive !== 'n' ? (
+                            <Badge bg="danger">Inactive</Badge>
+                          ) : (
+                            <Badge bg="success">Active</Badge>
+                          )}
+                        </td>
+                        <td>
+                          <Button
+                            variant="sm"
+                            onClick={() =>
+                              router.push(`/dashboard/products/edit/${product.prod_id}`)
+                            }
+                          >
+                            <i className="fa fa-edit"></i>
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </>
+            )}
+          </Card.Body>
+        </Card>
       )}
-
-      <form onSubmit={handleSearch}>
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="panel panel-primary">
-              <div className="panel-heading">
-                <h3 className="panel-title">Search Criteria</h3>
-              </div>
-              <div className="panel-body">
-                <div className="form-group">
-                  <label>Search Query</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Enter search term..."
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Match Type</label>
-                  <div>
-                    <div className="radio">
-                      <label>
-                        <input
-                          type="radio"
-                          value="name"
-                          checked={matchType === 'name'}
-                          onChange={(e) => setMatchType(e.target.value)}
-                        />
-                        Product Name
-                      </label>
-                    </div>
-                    <div className="radio">
-                      <label>
-                        <input
-                          type="radio"
-                          value="sku"
-                          checked={matchType === 'sku'}
-                          onChange={(e) => setMatchType(e.target.value)}
-                        />
-                        SKU
-                      </label>
-                    </div>
-                    <div className="radio">
-                      <label>
-                        <input
-                          type="radio"
-                          value="alternate_id"
-                          checked={matchType === 'alternate_id'}
-                          onChange={(e) => setMatchType(e.target.value)}
-                        />
-                        Alternate ID
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={loading}
-            >
-              {loading ? 'Searching...' : 'Search'}
-            </button>
-          </div>
-        </div>
-      </form>
-
-      {searched && (
-        <>
-          <br />
-          <div className="row">
-            <div className="col-lg-12">
-              <div className="panel panel-default">
-                <div className="panel-heading">
-                  <h3 className="panel-title">
-                    Search Results ({results.length})
-                  </h3>
-                </div>
-                <div className="panel-body">
-                  {results.length > 0 && (
-                    <button
-                      type="button"
-                      className="btn btn-default"
-                      onClick={handleExportCSV}
-                      style={{ marginBottom: '10px' }}
-                    >
-                      <i className="fa fa-download"></i> Export as CSV
-                    </button>
-                  )}
-
-                  {results.length === 0 ? (
-                    <p className="text-muted">No products found.</p>
-                  ) : (
-                    <table className="table table-hover table-striped">
-                      <thead>
-                        <tr>
-                          <th>Name</th>
-                          <th>SKU</th>
-                          <th>Price</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {results.map(product => (
-                          <tr key={product.id}>
-                            <td>{product.name}</td>
-                            <td>{product.sku}</td>
-                            <td>${parseFloat(product.price).toFixed(2)}</td>
-                            <td>
-                              <Link href={`/products/edit/${product.id}`} className="btn btn-sm btn-default">
-                                Edit
-                              </Link>
-                              <Link href={`/products/copy/${product.id}`} className="btn btn-sm btn-info">
-                                Copy
-                              </Link>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+    </Container>
   );
 }

@@ -4,107 +4,96 @@ import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 import Link from 'next/link';
 
-interface GatewayPage {
-  id: string;
-  name: string;
-  url: string;
-  description: string;
-  status: string;
-  created_date: string;
+interface MetaGateway {
+  id: number;
+  meta_name: string;
+  display_name: string;
+  meta_id: number;
+  destination: string;
 }
 
-export default function GatewayPagesListPage() {
-  const [pages, setPages] = useState<GatewayPage[]>([]);
+export default function MetaGatewayListPage() {
+  const [gateways, setGateways] = useState<MetaGateway[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchPages();
+    fetchGateways();
   }, []);
 
-  const fetchPages = async () => {
+  const fetchGateways = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/metagateway');
-      setPages(response.data.data || []);
+      const response = await api.get('/marketing/meta-gateways');
+      setGateways(response.data.items || []);
       setError(null);
     } catch (err) {
-      console.error('Failed to fetch gateway pages:', err);
-      setError('Failed to load gateway pages');
+      console.error('Failed to fetch gateways:', err);
+      setError('Failed to load gateways');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure?')) {
+  const handleDelete = async (id: number) => {
+    if (window.confirm('Are you sure you want to delete this gateway?')) {
       try {
-        await api.delete(`/metagateway/${id}`);
-        fetchPages();
+        await api.delete(`/marketing/meta-gateways/${id}`);
+        fetchGateways();
       } catch (err) {
-        console.error('Failed to delete page:', err);
-        setError('Failed to delete page');
+        console.error('Failed to delete gateway:', err);
+        setError('Failed to delete gateway');
       }
-    }
-  };
-
-  const formatDate = (dateString: string) => {
-    try {
-      return new Date(dateString).toLocaleDateString();
-    } catch {
-      return dateString;
     }
   };
 
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
-      <h1>Meta Gateway Pages</h1>
+      <h1>Meta Gateways</h1>
 
-      <div style={{ marginBottom: '20px' }}>
-        <Link href="/metagateway/add" className="btn btn-success">
-          <i className="fa fa-plus"></i> Add Gateway Page
-        </Link>
+      <div className="panel panel-default" style={{ marginBottom: '20px' }}>
+        <div className="panel-body">
+          <Link href="/dashboard/metagateway/add" className="btn btn-success">
+            <i className="fa fa-plus"></i> Create New Gateway
+          </Link>
+        </div>
       </div>
 
       {error && <div className="alert alert-danger">{error}</div>}
-      {loading && <div className="alert alert-info">Loading gateway pages...</div>}
+      {loading && <div className="alert alert-info">Loading gateways...</div>}
 
-      {!loading && pages.length > 0 && (
+      {!loading && gateways.length > 0 && (
         <div className="panel panel-default">
           <div className="panel-heading">
-            <h3 className="panel-title">Gateway Pages ({pages.length})</h3>
+            <h3 className="panel-title">Meta Gateways ({gateways.length})</h3>
           </div>
           <div className="table-responsive">
             <table className="table table-striped table-hover">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>URL</th>
-                  <th>Description</th>
-                  <th>Status</th>
-                  <th>Created</th>
+                  <th>Meta Name</th>
+                  <th>Display Name</th>
+                  <th>Destination</th>
                   <th style={{ width: '150px' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {pages.map((page) => (
-                  <tr key={page.id}>
-                    <td>{page.name}</td>
-                    <td>{page.url}</td>
-                    <td>{page.description}</td>
+                {gateways.map((gateway) => (
+                  <tr key={gateway.id}>
+                    <td>{gateway.meta_name}</td>
+                    <td>{gateway.display_name}</td>
+                    <td>{gateway.destination}</td>
                     <td>
-                      <span className={`label label-${page.status === 'active' ? 'success' : 'default'}`}>
-                        {page.status}
-                      </span>
-                    </td>
-                    <td>{formatDate(page.created_date)}</td>
-                    <td>
-                      <Link href={`/metagateway/edit/${page.id}`} className="btn btn-xs btn-warning">
+                      <Link
+                        href={`/dashboard/metagateway/edit/${gateway.id}`}
+                        className="btn btn-xs btn-warning"
+                      >
                         <i className="fa fa-edit"></i> Edit
                       </Link>
                       <button
                         className="btn btn-xs btn-danger"
-                        onClick={() => handleDelete(page.id)}
+                        onClick={() => handleDelete(gateway.id)}
+                        style={{ marginLeft: '5px' }}
                       >
                         <i className="fa fa-trash"></i> Delete
                       </button>
@@ -117,8 +106,10 @@ export default function GatewayPagesListPage() {
         </div>
       )}
 
-      {!loading && pages.length === 0 && !error && (
-        <div className="alert alert-info">No gateway pages found.</div>
+      {!loading && gateways.length === 0 && !error && (
+        <div className="alert alert-info">
+          No gateways found. <Link href="/dashboard/metagateway/add">Create one now</Link>
+        </div>
       )}
     </div>
   );

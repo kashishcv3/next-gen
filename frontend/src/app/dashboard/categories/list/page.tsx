@@ -1,22 +1,26 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { Container, Row, Col, Button, Table, Alert, Spinner, Card, Badge } from 'react-bootstrap';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import Link from 'next/link';
 
 interface Category {
-  id: string;
+  cat_id: number;
   name: string;
-  parent_id: string | null;
-  product_count: number;
-  children?: Category[];
+  url_name: string;
+  rank: number;
+  inactive: string;
+  count: number;
+  level: number;
+  subcat: Category[];
 }
 
-export default function CategoryListPage() {
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+export default function CategoriesListPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
 
   useEffect(() => {
     fetchCategories();
@@ -25,111 +29,133 @@ export default function CategoryListPage() {
   const fetchCategories = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/categories?include_counts=1');
-      setCategories(response.data.data || []);
+      setError(null);
+      const response = await api.get('/categories/list');
+      setCategories(response.data.categories || []);
     } catch (err) {
-      setError('Failed to load categories');
+      setError(err instanceof Error ? err.message : 'Failed to fetch categories');
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleCategory = (categoryId: string) => {
-    const newExpanded = new Set(expandedCategories);
-    if (newExpanded.has(categoryId)) {
-      newExpanded.delete(categoryId);
-    } else {
-      newExpanded.add(categoryId);
-    }
-    setExpandedCategories(newExpanded);
+  const renderCategories = (categories: Category[], level: number = 0) => {
+    return (
+      <>
+        {categories.map((cat) => (
+          <div key={cat.cat_id}>
+            <tr>
+              <td style={{ paddingLeft: `${level * 20}px` }}>
+                {cat.subcat && cat.subcat.length > 0 && (
+                  <i className="fa fa-folder"></i>
+                )}
+                {' '}
+                {cat.name}
+              </td>
+              <td>{cat.url_name}</td>
+              <td>{cat.rank}</td>
+              <td>{cat.count}</td>
+              <td>
+                {cat.inactive && cat.inactive !== 'n' ? (
+                  <Badge bg="warning">Inactive</Badge>
+                ) : (
+                  <Badge bg="success">Active</Badge>
+                )}
+              </td>
+              <td>
+                <Button
+                  variant="sm"
+                  className="me-1"
+                  onClick={() => router.push(`/dashboard/categories/edit/${cat.cat_id}`)}
+                >
+                  <i className="fa fa-edit"></i>
+                </Button>
+                <Button
+                  variant="sm"
+                  variant="danger"
+                  onClick={() => {
+                    if (confirm('Are you sure?')) {
+                      deleteCategory(cat.cat_id);
+                    }
+                  }}
+                >
+                  <i className="fa fa-trash"></i>
+                </Button>
+              </td>
+            </tr>
+            {cat.subcat && cat.subcat.length > 0 && renderCategories(cat.subcat, level + 1)}
+          </div>
+        ))}
+      </>
+    );
   };
 
-  const renderCategoryTree = (cats: Category[], depth: number = 0) => {
-    return cats.map(category => (
-      <div key={category.id}>
-        <div className="list-group-item" style={{ paddingLeft: `${depth * 30}px` }}>
-          <div className="row">
-            <div className="col-md-6">
-              <button
-                className="btn btn-link"
-                onClick={() => toggleCategory(category.id)}
-                style={{ marginRight: '10px' }}
-              >
-                {expandedCategories.has(category.id) ? '▼' : '▶'}
-              </button>
-              <strong>{category.name}</strong>
-            </div>
-            <div className="col-md-2 text-center">
-              <span className="badge">{category.product_count}</span>
-            </div>
-            <div className="col-md-4 text-right">
-              <Link href={`/categories/edit/${category.id}`} className="btn btn-sm btn-default">
-                Edit
-              </Link>
-              <Link href={`/categories/delete/${category.id}`} className="btn btn-sm btn-danger">
-                Delete
-              </Link>
-            </div>
-          </div>
-        </div>
-        {expandedCategories.has(category.id) && category.children && category.children.length > 0 && (
-          <div>{renderCategoryTree(category.children, depth + 1)}</div>
-        )}
-      </div>
-    ));
+  const deleteCategory = async (catId: number) => {
+    try {
+      await api.delete(`/categories/${catId}`);
+      setSuccess('Category deleted successfully');
+      fetchCategories();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete category');
+    }
   };
+
+  if (loading) {
+    return (
+      <Container className="mt-4" fluid>
+        <Spinner animation="border" />
+      </Container>
+    );
+  }
 
   return (
-    <div>
-      <div className="row">
-        <div className="col-lg-12">
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
           <h1>Categories</h1>
-          <p><i className="fa fa-info-circle"></i> Manage your product categories.</p>
-        </div>
-      </div>
-      <br />
-
-      {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
-          </div>
-        </div>
-      )}
-
-      <div className="row">
-        <div className="col-lg-12">
-          <Link href="/categories/add" className="btn btn-primary">
+        </Col>
+        <Col xs="auto">
+          <Button
+            variant="success"
+            onClick={() => router.push('/dashboard/categories/add')}
+          >
             <i className="fa fa-plus"></i> Add Category
-          </Link>
-          <Link href="/categories/import" className="btn btn-default">
+          </Button>{' '}
+          <Button variant="primary" onClick={() => router.push('/dashboard/categories/filter')}>
+            <i className="fa fa-filter"></i> Filters
+          </Button>{' '}
+          <Button variant="info" onClick={() => router.push('/dashboard/categories/import')}>
             <i className="fa fa-upload"></i> Import
-          </Link>
-          <Link href="/categories/export" className="btn btn-default">
+          </Button>{' '}
+          <Button variant="info" onClick={() => router.push('/dashboard/categories/export')}>
             <i className="fa fa-download"></i> Export
-          </Link>
-        </div>
-      </div>
-      <br />
+          </Button>
+        </Col>
+      </Row>
 
-      {loading ? (
-        <p>Loading...</p>
-      ) : (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="panel panel-default">
-              <div className="panel-heading">
-                <h3 className="panel-title">Category Hierarchy</h3>
-              </div>
-              <div className="panel-body">
-                <div className="list-group">
-                  {renderCategoryTree(categories)}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      <Card>
+        <Card.Body>
+          {categories.length === 0 ? (
+            <Alert variant="info">No categories found</Alert>
+          ) : (
+            <Table hover>
+              <thead>
+                <tr>
+                  <th>Category Name</th>
+                  <th>URL Name</th>
+                  <th>Rank</th>
+                  <th>Products</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>{renderCategories(categories)}</tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+    </Container>
   );
 }

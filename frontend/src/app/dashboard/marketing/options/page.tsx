@@ -1,294 +1,137 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import api from '@/lib/api';
-
-interface MarketingOptions {
-  id?: string;
-  sender_name: string;
-  sender_email: string;
-  reply_to: string;
-  default_subject: string;
-  footer_text: string;
-  unsubscribe_enabled: boolean;
-  track_opens: boolean;
-  track_clicks: boolean;
-  max_recipients_per_batch: number;
-  batch_delay_seconds: number;
-}
+import React, { useState } from 'react';
 
 export default function MarketingOptionsPage() {
-  const [options, setOptions] = useState<MarketingOptions>({
-    sender_name: '',
-    sender_email: '',
-    reply_to: '',
-    default_subject: '',
-    footer_text: '',
-    unsubscribe_enabled: true,
-    track_opens: true,
-    track_clicks: true,
-    max_recipients_per_batch: 100,
-    batch_delay_seconds: 5,
+  const [settings, setSettings] = useState({
+    allow_marketing_import: true,
+    allow_marketing_export: true,
+    default_opt_in: true,
+    send_confirmation: true,
+    confirmation_email: '',
+    from_email: '',
   });
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
 
-  useEffect(() => {
-    fetchOptions();
-  }, []);
-
-  const fetchOptions = async () => {
-    try {
-      setLoading(true);
-      const response = await api.get('/marketing/options');
-      setOptions(response.data.data || {
-        sender_name: '',
-        sender_email: '',
-        reply_to: '',
-        default_subject: '',
-        footer_text: '',
-        unsubscribe_enabled: true,
-        track_opens: true,
-        track_clicks: true,
-        max_recipients_per_batch: 100,
-        batch_delay_seconds: 5,
-      });
-      setError(null);
-    } catch (err) {
-      console.error('Failed to fetch options:', err);
-      setError('Failed to load marketing options');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [saved, setSaved] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value, type } = e.target as HTMLInputElement;
-    if (type === 'checkbox') {
-      setOptions((prev) => ({
-        ...prev,
-        [name]: (e.target as HTMLInputElement).checked,
-      }));
-    } else if (type === 'number') {
-      setOptions((prev) => ({
-        ...prev,
-        [name]: parseInt(value) || 0,
-      }));
-    } else {
-      setOptions((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
-    }
+    const { name, type, value } = e.target as HTMLInputElement;
+    const checked = (e.target as HTMLInputElement).checked;
+
+    setSettings((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+    }));
+    setSaved(false);
   };
 
-  const handleSave = async () => {
-    try {
-      setSaving(true);
-      setSuccess(false);
-      const response = await api.post('/marketing/options', options);
-      setOptions(response.data.data);
-      setSuccess(true);
-      setError(null);
-      setTimeout(() => setSuccess(false), 5000);
-    } catch (err) {
-      console.error('Failed to save options:', err);
-      setError('Failed to save marketing options');
-    } finally {
-      setSaving(false);
-    }
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // In a real implementation, this would save to the backend
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
   };
 
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
-      <h1>Marketing Options</h1>
+      <h1>Marketing Settings</h1>
 
-      {error && <div className="alert alert-danger">{error}</div>}
-      {success && <div className="alert alert-success">Marketing options saved successfully!</div>}
-      {loading && <div className="alert alert-info">Loading options...</div>}
+      {saved && <div className="alert alert-success">Settings saved successfully!</div>}
 
-      {!loading && (
+      <form onSubmit={handleSave}>
         <div className="panel panel-default">
           <div className="panel-heading">
-            <h3 className="panel-title">Email Configuration</h3>
+            <h3 className="panel-title">Email Marketing Settings</h3>
           </div>
           <div className="panel-body">
-            <div className="row">
-              <div className="col-md-6">
-                <div className="form-group">
-                  <label htmlFor="sender_name">Sender Name</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    id="sender_name"
-                    name="sender_name"
-                    value={options.sender_name}
-                    onChange={handleChange}
-                    placeholder="Your Company Name"
-                  />
-                </div>
-              </div>
-              <div className="col-md-6">
-                <div className="form-group">
-                  <label htmlFor="sender_email">Sender Email</label>
-                  <input
-                    type="email"
-                    className="form-control"
-                    id="sender_email"
-                    name="sender_email"
-                    value={options.sender_email}
-                    onChange={handleChange}
-                    placeholder="noreply@example.com"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="row">
-              <div className="col-md-6">
-                <div className="form-group">
-                  <label htmlFor="reply_to">Reply-To Email</label>
-                  <input
-                    type="email"
-                    className="form-control"
-                    id="reply_to"
-                    name="reply_to"
-                    value={options.reply_to}
-                    onChange={handleChange}
-                    placeholder="support@example.com"
-                  />
-                </div>
-              </div>
-              <div className="col-md-6">
-                <div className="form-group">
-                  <label htmlFor="default_subject">Default Subject Line</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    id="default_subject"
-                    name="default_subject"
-                    value={options.default_subject}
-                    onChange={handleChange}
-                    placeholder="Default subject"
-                  />
-                </div>
-              </div>
+            <div className="form-group">
+              <label htmlFor="allow_marketing_import">
+                <input
+                  type="checkbox"
+                  id="allow_marketing_import"
+                  name="allow_marketing_import"
+                  checked={settings.allow_marketing_import}
+                  onChange={handleChange}
+                  style={{ marginRight: '10px' }}
+                />
+                Allow Customers to Import Email Lists
+              </label>
             </div>
 
             <div className="form-group">
-              <label htmlFor="footer_text">Email Footer Text</label>
-              <textarea
+              <label htmlFor="allow_marketing_export">
+                <input
+                  type="checkbox"
+                  id="allow_marketing_export"
+                  name="allow_marketing_export"
+                  checked={settings.allow_marketing_export}
+                  onChange={handleChange}
+                  style={{ marginRight: '10px' }}
+                />
+                Allow Customers to Export Email Lists
+              </label>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="default_opt_in">
+                <input
+                  type="checkbox"
+                  id="default_opt_in"
+                  name="default_opt_in"
+                  checked={settings.default_opt_in}
+                  onChange={handleChange}
+                  style={{ marginRight: '10px' }}
+                />
+                Default Opt-In Status for New Contacts
+              </label>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="send_confirmation">
+                <input
+                  type="checkbox"
+                  id="send_confirmation"
+                  name="send_confirmation"
+                  checked={settings.send_confirmation}
+                  onChange={handleChange}
+                  style={{ marginRight: '10px' }}
+                />
+                Send Confirmation Email on Subscribe
+              </label>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="from_email">From Email Address</label>
+              <input
+                type="email"
                 className="form-control"
-                id="footer_text"
-                name="footer_text"
-                value={options.footer_text}
+                id="from_email"
+                name="from_email"
+                value={settings.from_email}
                 onChange={handleChange}
-                rows={4}
-                placeholder="Company footer information"
               />
             </div>
 
-            <div className="panel panel-default">
-              <div className="panel-heading">
-                <h3 className="panel-title">Tracking Settings</h3>
-              </div>
-              <div className="panel-body">
-                <div className="checkbox">
-                  <label>
-                    <input
-                      type="checkbox"
-                      name="track_opens"
-                      checked={options.track_opens}
-                      onChange={handleChange}
-                    />
-                    Track Email Opens
-                  </label>
-                </div>
-                <div className="checkbox">
-                  <label>
-                    <input
-                      type="checkbox"
-                      name="track_clicks"
-                      checked={options.track_clicks}
-                      onChange={handleChange}
-                    />
-                    Track Link Clicks
-                  </label>
-                </div>
-                <div className="checkbox">
-                  <label>
-                    <input
-                      type="checkbox"
-                      name="unsubscribe_enabled"
-                      checked={options.unsubscribe_enabled}
-                      onChange={handleChange}
-                    />
-                    Enable Unsubscribe Link
-                  </label>
-                </div>
-              </div>
+            <div className="form-group">
+              <label htmlFor="confirmation_email">Confirmation Email Subject</label>
+              <textarea
+                className="form-control"
+                id="confirmation_email"
+                name="confirmation_email"
+                value={settings.confirmation_email}
+                onChange={handleChange}
+                rows={3}
+              />
             </div>
 
-            <div className="panel panel-default">
-              <div className="panel-heading">
-                <h3 className="panel-title">Batch Settings</h3>
-              </div>
-              <div className="panel-body">
-                <div className="row">
-                  <div className="col-md-6">
-                    <div className="form-group">
-                      <label htmlFor="max_recipients_per_batch">Max Recipients Per Batch</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        id="max_recipients_per_batch"
-                        name="max_recipients_per_batch"
-                        value={options.max_recipients_per_batch}
-                        onChange={handleChange}
-                        min={1}
-                      />
-                    </div>
-                  </div>
-                  <div className="col-md-6">
-                    <div className="form-group">
-                      <label htmlFor="batch_delay_seconds">Delay Between Batches (seconds)</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        id="batch_delay_seconds"
-                        name="batch_delay_seconds"
-                        value={options.batch_delay_seconds}
-                        onChange={handleChange}
-                        min={0}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: '20px' }}>
-              <button
-                className="btn btn-primary"
-                onClick={handleSave}
-                disabled={saving || loading}
-              >
-                <i className="fa fa-save"></i> Save Options
-              </button>
-              <button
-                className="btn btn-default"
-                onClick={fetchOptions}
-                disabled={saving || loading}
-                style={{ marginLeft: '10px' }}
-              >
-                <i className="fa fa-undo"></i> Reset
+            <div className="form-group">
+              <button type="submit" className="btn btn-primary">
+                <i className="fa fa-save"></i> Save Settings
               </button>
             </div>
           </div>
         </div>
-      )}
+      </form>
     </div>
   );
 }

@@ -17,13 +17,14 @@ def get_current_user(
     token = credentials.credentials
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id: int = payload.get("sub")
-        if user_id is None:
+        user_id_raw = payload.get("sub")
+        if user_id_raw is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        user_id = int(user_id_raw)
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -45,7 +46,8 @@ def get_current_user(
 def get_current_admin_user(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    if current_user.user_type != "admin":
+    admin_types = {"admin", "bigadmin", "bigadmin_limit"}
+    if current_user.user_type not in admin_types:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",

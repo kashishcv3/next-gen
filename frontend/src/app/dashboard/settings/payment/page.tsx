@@ -3,157 +3,122 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-interface PaymentMethod {
+interface PaymentGateway {
   id: string;
-  name: string;
-  type: string;
+  gateway_name: string;
+  api_key: string;
+  api_secret: string;
   enabled: boolean;
 }
 
-interface PaymentOptions {
-  payment_methods: PaymentMethod[];
-  require_cvv: boolean;
-  store_credit_cards: boolean;
-  enable_subscriptions: boolean;
-  default_currency: string;
-}
-
-export default function SettingsPaymentPage() {
-  const [options, setOptions] = useState<PaymentOptions>({
-    payment_methods: [],
-    require_cvv: true,
-    store_credit_cards: false,
-    enable_subscriptions: false,
-    default_currency: 'USD',
-  });
-
+export default function PaymentSettingsPage() {
+  const [gateways, setGateways] = useState<PaymentGateway[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchOptions();
+    fetchGateways();
   }, []);
 
-  const fetchOptions = async () => {
+  const fetchGateways = async () => {
     try {
       const res = await api.get('/settings/payment');
-      setOptions(res.data.data);
+      setGateways(res.data.data || []);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load settings');
+      setError(err.response?.data?.message || 'Failed to load payment settings');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value, type, checked } = e.target;
-    setOptions(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value,
-    }));
-  };
-
-  const handleMethodToggle = (methodId: string, enabled: boolean) => {
-    setOptions(prev => ({
-      ...prev,
-      payment_methods: prev.payment_methods.map(m => 
-        m.id === methodId ? { ...m, enabled } : m
-      ),
-    }));
-  };
-
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-
+  const handleSubmit = async (gateway: PaymentGateway) => {
+    setSuccess(null);
     try {
-      await api.put('/settings/payment', options);
-      alert('Settings saved successfully');
+      await api.post('/settings/payment', gateway);
+      setSuccess('Payment gateway settings saved');
+      fetchGateways();
+      setEditingId(null);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to save settings');
-    } finally {
-      setSubmitting(false);
     }
   };
-
-  if (loading) return <div className="row"><div className="col-lg-12"><p>Loading...</p></div></div>;
 
   return (
     <div>
       <div className="row">
         <div className="col-lg-12">
           <h1>Payment Settings</h1>
-          <p><i className="fa fa-info-circle"></i> Configure payment methods and options.</p>
+          <p><i className="fa fa-info-circle"></i> Configure payment gateway settings.</p>
         </div>
       </div>
       <br />
 
       {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger">{error}</div></div></div>}
+      {success && <div className="row"><div className="col-lg-12"><div className="alert alert-success">{success}</div></div></div>}
 
-      <form onSubmit={handleSubmit}>
+      {!loading && (
         <div className="row">
-          <div className="col-lg-8">
-            <div className="panel panel-primary">
-              <div className="panel-heading">
-                <h3 className="panel-title"><i className="fa fa-credit-card"></i> Payment Methods</h3>
-              </div>
-              <div className="table-responsive">
-                <table className="table">
-                  <thead>
-                    <tr><th>Payment Method</th><th>Type</th><th>Enabled</th></tr>
-                  </thead>
-                  <tbody>
-                    {options.payment_methods.map(method => (
-                      <tr key={method.id}>
-                        <td>{method.name}</td>
-                        <td>{method.type}</td>
-                        <td>
-                          <input type="checkbox" checked={method.enabled} onChange={(e) => handleMethodToggle(method.id, e.target.checked)} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="panel panel-primary">
-              <div className="panel-heading">
-                <h3 className="panel-title"><i className="fa fa-cogs"></i> Payment Options</h3>
-              </div>
-              <div className="panel-body">
-                <div className="form-group">
-                  <label>Default Currency</label>
-                  <select className="form-control" name="default_currency" value={options.default_currency} onChange={handleInputChange}>
-                    <option value="USD">USD</option>
-                    <option value="EUR">EUR</option>
-                    <option value="GBP">GBP</option>
-                    <option value="CAD">CAD</option>
-                  </select>
+          <div className="col-lg-12">
+            {gateways.map((gateway, idx) => (
+              <div key={idx} className="panel panel-default" style={{ marginBottom: '20px' }}>
+                <div className="panel-heading">
+                  <h3 className="panel-title">{gateway.gateway_name}</h3>
                 </div>
-
-                <div className="form-group">
-                  <label><input type="checkbox" name="require_cvv" checked={options.require_cvv} onChange={handleInputChange} /> Require CVV</label>
-                </div>
-
-                <div className="form-group">
-                  <label><input type="checkbox" name="store_credit_cards" checked={options.store_credit_cards} onChange={handleInputChange} /> Store Credit Cards</label>
-                </div>
-
-                <div className="form-group">
-                  <label><input type="checkbox" name="enable_subscriptions" checked={options.enable_subscriptions} onChange={handleInputChange} /> Enable Subscriptions</label>
+                <div className="panel-body">
+                  {editingId === gateway.id ? (
+                    <form onSubmit={(e) => { e.preventDefault(); handleSubmit(gateway); }}>
+                      <div className="form-group">
+                        <label>API Key</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={gateway.api_key}
+                          onChange={(e) => {
+                            const updated = { ...gateway, api_key: e.target.value };
+                            setGateways(gateways.map((g, i) => i === gateways.indexOf(gateway) ? updated : g));
+                          }}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>API Secret</label>
+                        <input
+                          type="password"
+                          className="form-control"
+                          value={gateway.api_secret}
+                          onChange={(e) => {
+                            const updated = { ...gateway, api_secret: e.target.value };
+                            setGateways(gateways.map((g, i) => i === gateways.indexOf(gateway) ? updated : g));
+                          }}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>
+                          <input type="checkbox" checked={gateway.enabled} onChange={(e) => {
+                            const updated = { ...gateway, enabled: e.target.checked };
+                            setGateways(gateways.map((g, i) => i === gateways.indexOf(gateway) ? updated : g));
+                          }} />
+                          Enable Gateway
+                        </label>
+                      </div>
+                      <button type="submit" className="btn btn-success"><i className="fa fa-save"></i> Save</button>
+                      <button type="button" className="btn btn-default" onClick={() => setEditingId(null)}>Cancel</button>
+                    </form>
+                  ) : (
+                    <div>
+                      <p>Status: {gateway.enabled ? <span className="label label-success">Enabled</span> : <span className="label label-danger">Disabled</span>}</p>
+                      <button type="button" className="btn btn-primary" onClick={() => setEditingId(gateway.id)}><i className="fa fa-edit"></i> Edit</button>
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Saving...' : 'Save Settings'}
-            </button>
+            ))}
           </div>
         </div>
-      </form>
+      )}
+
+      {loading && <div className="row"><div className="col-lg-12"><p>Loading...</p></div></div>}
     </div>
   );
 }

@@ -1,78 +1,160 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { Container, Row, Col, Button, Alert, Spinner, Card, Form, Badge, Table } from 'react-bootstrap';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import Link from 'next/link';
 
-interface Item {
-  id: string;
-  name?: string;
-  title?: string;
-  status?: string;
-  created_at?: string;
+interface File {
+  id: number;
+  filename: string;
+  file_size: number;
+  file_type: string;
+  upload_date: string;
 }
 
-export default function ListPage() {
-  const [items, setItems] = useState<Item[]>([]);
+export default function FilesListPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const [filter, setFilter] = useState('all');
 
-  useEffect(() => { fetchItems(); }, []);
+  useEffect(() => {
+    fetchFiles();
+  }, [filter]);
 
-  const fetchItems = async (searchTerm?: string) => {
+  const fetchFiles = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('search', searchTerm);
-      const response = await api.get(`/files?${params.toString()}`);
-      setItems(response.data.data || []);
+      setError(null);
+      const response = await api.get('/files/list', {
+        params: { filter },
+      });
+      setFiles(response.data.files || []);
     } catch (err) {
-      console.error('Error:', err);
-      setError('Failed to load');
+      setError(err instanceof Error ? err.message : 'Failed to fetch files');
     } finally {
       setLoading(false);
     }
   };
 
-  const formatDate = (dateString: string) => {
-    try { return new Date(dateString).toLocaleDateString(); } catch { return dateString; }
+  if (loading) {
+    return (
+      <Container className="mt-4" fluid>
+        <Spinner animation="border" />
+      </Container>
+    );
+  }
+
+  const getFileIcon = (fileType: string) => {
+    if (fileType.includes('pdf')) return 'fa-file-pdf';
+    if (fileType.includes('word') || fileType.includes('document')) return 'fa-file-word';
+    if (fileType.includes('sheet') || fileType.includes('csv')) return 'fa-file-csv';
+    if (fileType.includes('zip') || fileType.includes('archive')) return 'fa-file-archive';
+    return 'fa-file';
   };
 
-  if (loading) return <div className="alert alert-info">Loading...</div>;
-  if (error) return <div className="alert alert-danger">{error}</div>;
-
   return (
-    <div className="container-fluid" style={{ padding: '20px'}}>
-      <h1>Files</h1>
-      <div className="panel panel-default" style={{ marginBottom: '20px'}}>
-        <div className="panel-body">
-          <input
-            type="text"
-            className="form-control"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search..."
-            onKeyPress={(e) => e.key === 'Enter' && fetchItems(search)}
-          />
-          <button className="btn btn-primary" onClick={() => fetchItems(search)} style={{ marginTop: '10px'}}>
-            <i className="fa fa-search"></i> Search
-          </button>
-        </div>
-      </div>
-      <div className="panel panel-default">
-        <div className="panel-heading"><h3 className="panel-title">Items</h3></div>
-        {items.length > 0 ? (
-          <div className="table-responsive">
-            <table className="table table-striped">
-              <thead><tr><th>Name</th><th>Status</th><th>Created</th><th style={{ width: '100px'}}>Action</th></tr></thead>
-              <tbody>{items.map(item => (<tr key={item.id}><td>{item.name || item.title}</td><td>{item.status || 'N/A'}</td><td>{item.created_at ? formatDate(item.created_at) : 'N/A'}</td><td><Link href={`/files/${item.id}`} className="btn btn-xs btn-primary">View</Link></td></tr>))}</tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="panel-body"><p>No items found.</p></div>
-        )}
-      </div>
-    </div>
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
+          <h1>File Library</h1>
+        </Col>
+        <Col xs="auto">
+          <Button
+            variant="success"
+            onClick={() => router.push('/dashboard/files/upload')}
+          >
+            <i className="fa fa-upload"></i> Upload Files
+          </Button>{' '}
+          <Button variant="info" onClick={() => router.push('/dashboard/files/organize')}>
+            <i className="fa fa-folder"></i> Organize
+          </Button>
+        </Col>
+      </Row>
+
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      <Card className="mb-4">
+        <Card.Body>
+          <Form.Group>
+            <Form.Label>Filter Files</Form.Label>
+            <Form.Select value={filter} onChange={(e) => setFilter(e.target.value)}>
+              <option value="all">All Files</option>
+              <option value="documents">Documents</option>
+              <option value="downloads">Downloads</option>
+              <option value="archives">Archives</option>
+              <option value="unused">Unused Files</option>
+            </Form.Select>
+          </Form.Group>
+        </Card.Body>
+      </Card>
+
+      <Card>
+        <Card.Body>
+          {files.length === 0 ? (
+            <Alert variant="info">No files found</Alert>
+          ) : (
+            <Table hover>
+              <thead>
+                <tr>
+                  <th>Filename</th>
+                  <th>Type</th>
+                  <th>Size</th>
+                  <th>Upload Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {files.map((file) => (
+                  <tr key={file.id}>
+                    <td>
+                      <i className={`fa ${getFileIcon(file.file_type)}`}></i> {file.filename}
+                    </td>
+                    <td>
+                      <Badge bg="info">{file.file_type}</Badge>
+                    </td>
+                    <td>{(file.file_size / 1024).toFixed(2)} KB</td>
+                    <td>{file.upload_date}</td>
+                    <td>
+                      <Button
+                        variant="sm"
+                        className="me-1"
+                        onClick={() =>
+                          router.push(`/dashboard/files/edit/${file.id}`)
+                        }
+                      >
+                        <i className="fa fa-edit"></i>
+                      </Button>
+                      <Button
+                        variant="sm"
+                        variant="danger"
+                        onClick={() => {
+                          if (confirm('Are you sure?')) {
+                            deleteFile(file.id);
+                          }
+                        }}
+                      >
+                        <i className="fa fa-trash"></i>
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+    </Container>
   );
 }
+
+const deleteFile = async (fileId: number) => {
+  try {
+    await api.delete(`/files/${fileId}`);
+    window.location.reload();
+  } catch (err) {
+    console.error('Failed to delete file');
+  }
+};

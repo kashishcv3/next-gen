@@ -2,77 +2,73 @@
 
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
-import Link from 'next/link';
 
-interface Item {
-  id: string;
-  name?: string;
-  title?: string;
-  status?: string;
-  created_at?: string;
-}
-
-export default function ListPage() {
-  const [items, setItems] = useState<Item[]>([]);
+export default function WishlistPage() {
+  const [wishlists, setWishlists] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
 
-  useEffect(() => { fetchItems(); }, []);
+  useEffect(() => {
+    fetchWishlists();
+  }, []);
 
-  const fetchItems = async (searchTerm?: string) => {
+  const fetchWishlists = async () => {
     try {
-      setLoading(true);
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('search', searchTerm);
-      const response = await api.get(`/wishlist?${params.toString()}`);
-      setItems(response.data.data || []);
-    } catch (err) {
-      console.error('Error:', err);
-      setError('Failed to load');
+      const res = await api.get('/customers/wishlists');
+      setWishlists(res.data.data || []);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to load wishlists');
     } finally {
       setLoading(false);
     }
   };
 
-  const formatDate = (dateString: string) => {
-    try { return new Date(dateString).toLocaleDateString(); } catch { return dateString; }
-  };
-
-  if (loading) return <div className="alert alert-info">Loading...</div>;
-  if (error) return <div className="alert alert-danger">{error}</div>;
-
   return (
-    <div className="container-fluid" style={{ padding: '20px'}}>
-      <h1>Wishlist</h1>
-      <div className="panel panel-default" style={{ marginBottom: '20px'}}>
-        <div className="panel-body">
-          <input
-            type="text"
-            className="form-control"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search..."
-            onKeyPress={(e) => e.key === 'Enter' && fetchItems(search)}
-          />
-          <button className="btn btn-primary" onClick={() => fetchItems(search)} style={{ marginTop: '10px'}}>
-            <i className="fa fa-search"></i> Search
-          </button>
+    <div>
+      <div className="row">
+        <div className="col-lg-12">
+          <h1>Customer Wishlists</h1>
+          <p><i className="fa fa-info-circle"></i> View customer wish lists.</p>
         </div>
       </div>
-      <div className="panel panel-default">
-        <div className="panel-heading"><h3 className="panel-title">Items</h3></div>
-        {items.length > 0 ? (
-          <div className="table-responsive">
-            <table className="table table-striped">
-              <thead><tr><th>Name</th><th>Status</th><th>Created</th><th style={{ width: '100px'}}>Action</th></tr></thead>
-              <tbody>{items.map(item => (<tr key={item.id}><td>{item.name || item.title}</td><td>{item.status || 'N/A'}</td><td>{item.created_at ? formatDate(item.created_at) : 'N/A'}</td><td><Link href={`/wishlist/${item.id}`} className="btn btn-xs btn-primary">View</Link></td></tr>))}</tbody>
-            </table>
+      <br />
+
+      {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger">{error}</div></div></div>}
+
+      {!loading && (
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="panel panel-primary">
+              <div className="panel-heading">
+                <h3 className="panel-title"><i className="fa fa-heart"></i> Customer Wishlists</h3>
+              </div>
+              <div className="table-responsive">
+                <table className="table table-striped table-hover">
+                  <thead>
+                    <tr><th>Customer</th><th>Product Count</th><th>Created</th><th>Actions</th></tr>
+                  </thead>
+                  <tbody>
+                    {wishlists.length > 0 ? wishlists.map(wishlist => (
+                      <tr key={wishlist.id}>
+                        <td>{wishlist.customer_name}</td>
+                        <td>{wishlist.product_count}</td>
+                        <td>{new Date(wishlist.created_at).toLocaleDateString()}</td>
+                        <td>
+                          <button className="btn btn-xs btn-info"><i className="fa fa-eye"></i> View</button>
+                        </td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan={4} className="text-center">No wishlists found</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="panel-body"><p>No items found.</p></div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {loading && <div className="row"><div className="col-lg-12"><p>Loading...</p></div></div>}
     </div>
   );
 }

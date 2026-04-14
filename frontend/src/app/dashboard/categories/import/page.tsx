@@ -1,139 +1,124 @@
 'use client';
 
-import React, { useState } from 'react';
-import api from '@/lib/api';
+import { useState } from 'react';
+import { Container, Row, Col, Button, Alert, Card, Form, Spinner } from 'react-bootstrap';
 import { useRouter } from 'next/navigation';
-
-interface FormData {
-  file: File | null;
-  delimiter: string;
-}
 
 export default function CategoryImportPage() {
   const router = useRouter();
-  const [formData, setFormData] = useState<FormData>({
-    file: null,
-    delimiter: ',',
-  });
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData(prev => ({
-      ...prev,
-      file: e.target.files?.[0] || null,
-    }));
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      setFile(files[0]);
+      setError(null);
+    }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setFormData(prev => ({
-      ...prev,
-      [e.target.name]: e.target.value,
-    }));
-  };
-
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
+    if (!file) {
+      setError('Please select a file');
+      return;
+    }
 
     try {
-      if (!formData.file) throw new Error('Please select a file');
+      setLoading(true);
+      setError(null);
+      const formData = new FormData();
+      formData.append('file', file);
 
-      const formDataToSend = new FormData();
-      formDataToSend.append('file', formData.file);
-      formDataToSend.append('delimiter', formData.delimiter);
-
-      const response = await api.post('/categories/import', formDataToSend, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const response = await fetch('/api/v1/categories/import', {
+        method: 'POST',
+        body: formData,
       });
 
-      setSuccess(response.data.message || 'Categories imported successfully');
-      setFormData({ file: null, delimiter: ',' });
-    } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Import failed');
+      if (!response.ok) {
+        throw new Error(`Import failed: ${response.statusText}`);
+      }
+
+      setSuccess('Categories imported successfully');
+      setFile(null);
+      setTimeout(() => router.push('/dashboard/categories/list'), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div>
-      <div className="row">
-        <div className="col-lg-12">
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
           <h1>Import Categories</h1>
-          <p><i className="fa fa-upload"></i> Upload a CSV file to import categories.</p>
-        </div>
-      </div>
-      <br />
+        </Col>
+        <Col xs="auto">
+          <Button variant="primary" onClick={() => router.push('/dashboard/categories/list')}>
+            <i className="fa fa-arrow-left"></i> Back to Categories
+          </Button>
+        </Col>
+      </Row>
 
-      {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
-          </div>
-        </div>
-      )}
+      {error && <Alert variant="danger">{error}</Alert>}
+      {success && <Alert variant="success">{success}</Alert>}
 
-      {success && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-success">{success}</div>
-          </div>
-        </div>
-      )}
+      <Card>
+        <Card.Body>
+          <Form onSubmit={handleSubmit}>
+            <Form.Group className="mb-3">
+              <Form.Label>Select CSV File to Import</Form.Label>
+              <Form.Control
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                onChange={handleFileChange}
+                disabled={loading}
+              />
+              <Form.Text className="text-muted">
+                Supported formats: CSV, XLSX, XLS
+              </Form.Text>
+            </Form.Group>
 
-      <form onSubmit={handleSubmit}>
-        <div className="row">
-          <div className="col-lg-8">
-            <div className="panel panel-primary">
-              <div className="panel-heading">
-                <h3 className="panel-title">Import Settings</h3>
-              </div>
-              <div className="panel-body">
-                <div className="form-group">
-                  <label>Select File *</label>
-                  <input
-                    type="file"
-                    className="form-control"
-                    accept=".csv,.txt"
-                    onChange={handleFileChange}
-                    required
-                  />
-                </div>
+            {file && (
+              <Form.Group className="mb-3">
+                <p className="text-muted">
+                  Selected file: <strong>{file.name}</strong>
+                </p>
+              </Form.Group>
+            )}
 
-                <div className="form-group">
-                  <label>Delimiter</label>
-                  <select
-                    className="form-control"
-                    name="delimiter"
-                    value={formData.delimiter}
-                    onChange={handleInputChange}
-                  >
-                    <option value=",">Comma (,)</option>
-                    <option value=";">Semicolon (;)</option>
-                    <option value="\t">Tab</option>
-                  </select>
-                </div>
-              </div>
-            </div>
+            <Button variant="primary" type="submit" disabled={loading || !file}>
+              {loading && <Spinner animation="border" size="sm" className="me-2" />}
+              Import Categories
+            </Button>
+          </Form>
+        </Card.Body>
+      </Card>
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={loading}
-            >
-              {loading ? 'Importing...' : 'Import Categories'}
-            </button>
-            <a href="/categories/list" className="btn btn-default">
-              Cancel
-            </a>
-          </div>
-        </div>
-      </form>
-    </div>
+      <Card className="mt-4">
+        <Card.Header>
+          <h5>Import Template</h5>
+        </Card.Header>
+        <Card.Body>
+          <p>Your CSV file should include these columns:</p>
+          <ul>
+            <li>cat_name - Category Name (required)</li>
+            <li>url_name - URL Name</li>
+            <li>cat_description - Category Description</li>
+            <li>meta_title - Meta Title</li>
+            <li>meta_keywords - Meta Keywords</li>
+            <li>cat_parent - Parent Category ID</li>
+            <li>rank - Sort Order</li>
+          </ul>
+          <Button variant="outline-primary" size="sm">
+            <i className="fa fa-download"></i> Download Template
+          </Button>
+        </Card.Body>
+      </Card>
+    </Container>
   );
 }

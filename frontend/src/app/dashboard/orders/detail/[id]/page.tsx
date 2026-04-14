@@ -2,52 +2,62 @@
 
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 
-interface OrderProduct {
-  id: string;
-  sku: string;
+interface OrderItem {
   product_name: string;
+  sku: string;
   quantity: number;
   unit_price: number;
-  total_price: number;
+  total: number;
 }
 
-interface ShippingAddress {
-  name: string;
-  address: string;
-  city: string;
-  state: string;
-  zip: string;
-  country: string;
-}
-
-interface Order {
-  id: string;
-  order_id: string;
+interface OrderDetail {
+  order_id: number;
   customer_name: string;
   customer_email: string;
-  customer_phone: string;
-  total: number;
-  subtotal: number;
-  tax: number;
-  shipping: number;
-  created_at: string;
+  customer_ip: string;
+  total_price: number;
+  total_tax: number;
+  total_shipping: number;
   status: string;
-  products: OrderProduct[];
-  shipping_address: ShippingAddress;
-  billing_address: ShippingAddress;
-  notes: string;
-  is_subscription: boolean;
+  date_ordered: string;
+  date_updated: string;
+  payment_method: string;
+  payment_gateway?: string;
+  transaction_id?: string;
+  billing_address1: string;
+  billing_address2?: string;
+  billing_city: string;
+  billing_state: string;
+  billing_zip: string;
+  billing_country: string;
+  billing_phone?: string;
+  shipping_name: string;
+  shipping_address1: string;
+  shipping_address2?: string;
+  shipping_city: string;
+  shipping_state: string;
+  shipping_zip: string;
+  shipping_country: string;
+  shipping_method?: string;
+  items: OrderItem[];
+  invalid?: string;
+  incomplete?: string;
+  tracking?: string;
+  comments?: string;
 }
 
 export default function OrderDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const orderId = params.id as string;
-  const [order, setOrder] = useState<Order | null>(null);
+  const siteId = searchParams.get('site_id') || '1';
+
+  const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (orderId) {
@@ -58,8 +68,11 @@ export default function OrderDetailPage() {
   const fetchOrderDetail = async () => {
     try {
       setLoading(true);
-      const response = await api.get(`/orders/${orderId}`);
-      setOrder(response.data.data);
+      const params = new URLSearchParams();
+      params.append('site_id', siteId);
+
+      const response = await api.get<OrderDetail>(`/orders/${orderId}?${params.toString()}`);
+      setOrder(response.data);
       setError(null);
     } catch (err) {
       console.error('Failed to fetch order:', err);
@@ -69,16 +82,6 @@ export default function OrderDetailPage() {
     }
   };
 
-  const toggleProductExpand = (productId: string) => {
-    const newExpanded = new Set(expandedProducts);
-    if (newExpanded.has(productId)) {
-      newExpanded.delete(productId);
-    } else {
-      newExpanded.add(productId);
-    }
-    setExpandedProducts(newExpanded);
-  };
-
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -86,31 +89,43 @@ export default function OrderDetailPage() {
     }).format(amount);
   };
 
-  const formatDate = (dateString: string) => {
-    try {
-      return new Date(dateString).toLocaleDateString();
-    } catch {
-      return dateString;
-    }
-  };
-
   if (loading) {
-    return <div className="container-fluid" style={{ padding: '20px' }}><div className="alert alert-info">Loading order details...</div></div>;
+    return (
+      <div className="container-fluid" style={{ padding: '20px' }}>
+        <div className="alert alert-info">
+          <i className="fa fa-spinner fa-spin"></i> Loading order details...
+        </div>
+      </div>
+    );
   }
 
   if (error) {
-    return <div className="container-fluid" style={{ padding: '20px' }}><div className="alert alert-danger">{error}</div></div>;
+    return (
+      <div className="container-fluid" style={{ padding: '20px' }}>
+        <div className="alert alert-danger">
+          <i className="fa fa-exclamation-circle"></i> {error}
+        </div>
+      </div>
+    );
   }
 
   if (!order) {
-    return <div className="container-fluid" style={{ padding: '20px' }}><div className="alert alert-warning">Order not found</div></div>;
+    return (
+      <div className="container-fluid" style={{ padding: '20px' }}>
+        <div className="alert alert-warning">
+          <i className="fa fa-info-circle"></i> Order not found
+        </div>
+      </div>
+    );
   }
+
+  const subtotal = order.total_price - order.total_tax - order.total_shipping;
 
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
       <div className="row">
         <div className="col-md-12">
-          <h1>Order #{order.order_id}</h1>
+          <h1>Order #{String(order.order_id).padStart(4, '0')}</h1>
           <hr />
         </div>
       </div>
@@ -120,55 +135,105 @@ export default function OrderDetailPage() {
         <div className="col-md-8">
           <div className="panel panel-default">
             <div className="panel-heading">
-              <h3 className="panel-title">Order Information</h3>
+              <h3 className="panel-title"><i className="fa fa-info-circle"></i> Order Information</h3>
             </div>
             <div className="panel-body">
               <div className="row">
                 <div className="col-md-6">
-                  <p><strong>Order Date:</strong> {formatDate(order.created_at)}</p>
-                  <p><strong>Status:</strong> <span className={`label label-${getStatusClass(order.status)}`}>{order.status}</span></p>
-                  <p><strong>Customer Name:</strong> {order.customer_name}</p>
-                  <p><strong>Email:</strong> <a href={`mailto:${order.customer_email}`}>{order.customer_email}</a></p>
+                  <p>
+                    <strong>Order ID:</strong> {String(order.order_id).padStart(4, '0')}
+                  </p>
+                  <p>
+                    <strong>Date Ordered:</strong> {order.date_ordered}
+                  </p>
+                  <p>
+                    <strong>Status:</strong>{' '}
+                    <span className={`label label-${getStatusClass(order.status)}`}>
+                      {order.status}
+                    </span>
+                  </p>
+                  <p>
+                    <strong>Customer:</strong> {order.customer_name}
+                  </p>
+                  <p>
+                    <strong>Email:</strong>{' '}
+                    <a href={`mailto:${order.customer_email}`}>{order.customer_email}</a>
+                  </p>
                 </div>
                 <div className="col-md-6">
-                  <p><strong>Phone:</strong> {order.customer_phone}</p>
-                  <p><strong>Subscription:</strong> {order.is_subscription ? <span className="label label-success">Yes</span> : <span className="label label-default">No</span>}</p>
+                  <p>
+                    <strong>IP Address:</strong> {order.customer_ip}
+                  </p>
+                  <p>
+                    <strong>Payment Method:</strong> {order.payment_method || 'N/A'}
+                  </p>
+                  {order.transaction_id && (
+                    <p>
+                      <strong>Transaction ID:</strong> {order.transaction_id}
+                    </p>
+                  )}
+                  {order.tracking && (
+                    <p>
+                      <strong>Tracking:</strong> {order.tracking}
+                    </p>
+                  )}
+                  {order.date_updated && (
+                    <p>
+                      <strong>Last Updated:</strong> {order.date_updated}
+                    </p>
+                  )}
                 </div>
               </div>
-              {order.notes && (
+              {order.comments && (
                 <div style={{ marginTop: '15px' }}>
-                  <strong>Notes:</strong>
-                  <p className="text-muted">{order.notes}</p>
+                  <strong>Comments:</strong>
+                  <p className="text-muted">{order.comments}</p>
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* Address Summary */}
+        {/* Shipping Address */}
         <div className="col-md-4">
           <div className="panel panel-default">
             <div className="panel-heading">
-              <h3 className="panel-title">Shipping Address</h3>
+              <h3 className="panel-title"><i className="fa fa-truck"></i> Shipping Address</h3>
             </div>
             <div className="panel-body">
               <address>
-                <strong>{order.shipping_address.name}</strong><br />
-                {order.shipping_address.address}<br />
-                {order.shipping_address.city}, {order.shipping_address.state} {order.shipping_address.zip}<br />
-                {order.shipping_address.country}
+                <strong>{order.shipping_name}</strong>
+                <br />
+                {order.shipping_address1}
+                <br />
+                {order.shipping_address2 && (
+                  <>
+                    {order.shipping_address2}
+                    <br />
+                  </>
+                )}
+                {order.shipping_city}, {order.shipping_state} {order.shipping_zip}
+                <br />
+                {order.shipping_country}
               </address>
+              {order.shipping_method && (
+                <p>
+                  <strong>Method:</strong> {order.shipping_method}
+                </p>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Products */}
+      {/* Order Items */}
       <div className="row" style={{ marginTop: '20px' }}>
         <div className="col-md-12">
           <div className="panel panel-default">
             <div className="panel-heading">
-              <h3 className="panel-title">Order Items ({order.products.length})</h3>
+              <h3 className="panel-title">
+                <i className="fa fa-shopping-cart"></i> Order Items ({order.items.length})
+              </h3>
             </div>
             <div className="table-responsive">
               <table className="table table-striped">
@@ -179,40 +244,17 @@ export default function OrderDetailPage() {
                     <th style={{ textAlign: 'center', width: '80px' }}>Quantity</th>
                     <th style={{ textAlign: 'right', width: '100px' }}>Unit Price</th>
                     <th style={{ textAlign: 'right', width: '100px' }}>Total</th>
-                    <th style={{ width: '50px' }}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {order.products.map((product) => (
-                    <React.Fragment key={product.id}>
-                      <tr>
-                        <td>{product.sku}</td>
-                        <td>{product.product_name}</td>
-                        <td style={{ textAlign: 'center' }}>{product.quantity}</td>
-                        <td style={{ textAlign: 'right' }}>{formatCurrency(product.unit_price)}</td>
-                        <td style={{ textAlign: 'right' }}>{formatCurrency(product.total_price)}</td>
-                        <td>
-                          <button
-                            className="btn btn-xs btn-default"
-                            onClick={() => toggleProductExpand(product.id)}
-                          >
-                            <i className={`fa fa-chevron-${expandedProducts.has(product.id) ? 'up' : 'down'}`}></i>
-                          </button>
-                        </td>
-                      </tr>
-                      {expandedProducts.has(product.id) && (
-                        <tr style={{ backgroundColor: '#f9f9f9' }}>
-                          <td colSpan={6}>
-                            <div style={{ padding: '10px 0' }}>
-                              <strong>Details:</strong>
-                              <p style={{ marginBottom: '5px' }}>SKU: {product.sku}</p>
-                              <p style={{ marginBottom: '5px' }}>Cost: {formatCurrency(product.unit_price)}</p>
-                              <p>Total Cost: {formatCurrency(product.total_price)}</p>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
+                  {order.items.map((item, index) => (
+                    <tr key={index}>
+                      <td>{item.sku}</td>
+                      <td>{item.product_name}</td>
+                      <td style={{ textAlign: 'center' }}>{item.quantity}</td>
+                      <td style={{ textAlign: 'right' }}>{formatCurrency(item.unit_price)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatCurrency(item.total)}</td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
@@ -221,41 +263,41 @@ export default function OrderDetailPage() {
         </div>
       </div>
 
-      {/* Totals */}
+      {/* Order Totals */}
       <div className="row" style={{ marginTop: '20px' }}>
         <div className="col-md-8"></div>
         <div className="col-md-4">
           <div className="panel panel-default">
             <div className="panel-heading">
-              <h3 className="panel-title">Order Totals</h3>
+              <h3 className="panel-title"><i className="fa fa-calculator"></i> Order Totals</h3>
             </div>
             <div className="panel-body">
               <div style={{ marginBottom: '10px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>Subtotal:</span>
-                  <span>{formatCurrency(order.subtotal)}</span>
+                  <span>{formatCurrency(subtotal)}</span>
                 </div>
               </div>
-              {order.tax > 0 && (
+              {order.total_tax > 0 && (
                 <div style={{ marginBottom: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Tax:</span>
-                    <span>{formatCurrency(order.tax)}</span>
+                    <span>{formatCurrency(order.total_tax)}</span>
                   </div>
                 </div>
               )}
-              {order.shipping > 0 && (
+              {order.total_shipping > 0 && (
                 <div style={{ marginBottom: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Shipping:</span>
-                    <span>{formatCurrency(order.shipping)}</span>
+                    <span>{formatCurrency(order.total_shipping)}</span>
                   </div>
                 </div>
               )}
               <hr />
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '16px', fontWeight: 'bold' }}>
                 <span>Grand Total:</span>
-                <span>{formatCurrency(order.total)}</span>
+                <span>{formatCurrency(order.total_price)}</span>
               </div>
             </div>
           </div>
@@ -263,25 +305,37 @@ export default function OrderDetailPage() {
       </div>
 
       {/* Billing Address */}
-      {order.billing_address && (
-        <div className="row" style={{ marginTop: '20px' }}>
-          <div className="col-md-4">
-            <div className="panel panel-default">
-              <div className="panel-heading">
-                <h3 className="panel-title">Billing Address</h3>
-              </div>
-              <div className="panel-body">
-                <address>
-                  <strong>{order.billing_address.name}</strong><br />
-                  {order.billing_address.address}<br />
-                  {order.billing_address.city}, {order.billing_address.state} {order.billing_address.zip}<br />
-                  {order.billing_address.country}
-                </address>
-              </div>
+      <div className="row" style={{ marginTop: '20px' }}>
+        <div className="col-md-4">
+          <div className="panel panel-default">
+            <div className="panel-heading">
+              <h3 className="panel-title"><i className="fa fa-credit-card"></i> Billing Address</h3>
+            </div>
+            <div className="panel-body">
+              <address>
+                <strong>{order.customer_name}</strong>
+                <br />
+                {order.billing_address1}
+                <br />
+                {order.billing_address2 && (
+                  <>
+                    {order.billing_address2}
+                    <br />
+                  </>
+                )}
+                {order.billing_city}, {order.billing_state} {order.billing_zip}
+                <br />
+                {order.billing_country}
+              </address>
+              {order.billing_phone && (
+                <p>
+                  <strong>Phone:</strong> {order.billing_phone}
+                </p>
+              )}
             </div>
           </div>
         </div>
-      )}
+      </div>
 
       {/* Action Buttons */}
       <div className="row" style={{ marginTop: '20px', marginBottom: '20px' }}>
@@ -290,19 +344,28 @@ export default function OrderDetailPage() {
             <button className="btn btn-default">
               <i className="fa fa-edit"></i> Edit Order
             </button>
-            <button className="btn btn-default">
+            <Link href={`/dashboard/orders/${order.order_id}/print`} className="btn btn-default">
               <i className="fa fa-print"></i> Print
-            </button>
+            </Link>
             <button className="btn btn-default">
               <i className="fa fa-envelope"></i> Send Email
             </button>
-            <button className="btn btn-default">
+            <Link href={`/dashboard/orders/export`} className="btn btn-default">
               <i className="fa fa-download"></i> Export
-            </button>
+            </Link>
             <button className="btn btn-danger">
               <i className="fa fa-trash"></i> Delete
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Back Link */}
+      <div className="row">
+        <div className="col-md-12">
+          <Link href="/dashboard/orders/list" className="btn btn-link">
+            <i className="fa fa-arrow-left"></i> Back to Orders
+          </Link>
         </div>
       </div>
     </div>
@@ -312,12 +375,17 @@ export default function OrderDetailPage() {
 function getStatusClass(status: string): string {
   switch (status?.toLowerCase()) {
     case 'completed':
+    case 'received':
+    case 'shipped':
       return 'success';
     case 'pending':
+    case 'new':
       return 'warning';
     case 'cancelled':
+    case 'failed':
       return 'danger';
     case 'processing':
+    case 'paid':
       return 'info';
     default:
       return 'default';

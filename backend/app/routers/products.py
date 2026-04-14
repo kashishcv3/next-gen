@@ -1,33 +1,55 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from app.database import get_db
 from app.models.user import User
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_current_admin_user
+from datetime import datetime
 
 router = APIRouter(prefix="/products", tags=["products"])
 
 
 class ProductItem(BaseModel):
-    id: int
-    name: str
+    prod_id: int
+    prod_name: str
     sku: Optional[str]
-    price: Optional[float]
-    status: str
+    is_parent: Optional[str]
+    parent: Optional[int]
+    inactive: Optional[str]
+    has_attributes: Optional[str]
+    special_start: Optional[str]
+    special_stop: Optional[str]
+    free_special: Optional[str]
+    ext_id: Optional[str]
+    cat_id: Optional[int]
+    prod_order: Optional[int]
+    weight: Optional[float]
 
     class Config:
         from_attributes = True
 
 
 class ProductDetail(BaseModel):
-    id: int
-    name: str
+    prod_id: int
+    prod_name: str
     sku: Optional[str]
-    price: Optional[float]
     description: Optional[str]
-    status: str
-    created_at: Optional[str]
+    is_parent: Optional[str]
+    parent: Optional[int]
+    inactive: Optional[str]
+    has_attributes: Optional[str]
+    special_start: Optional[str]
+    special_stop: Optional[str]
+    free_special: Optional[str]
+    ext_id: Optional[str]
+    retail: Optional[str]
+    wholesale: Optional[str]
+    featured: Optional[str]
+    new: Optional[str]
+    date_added: Optional[str]
+    date_modified: Optional[str]
 
     class Config:
         from_attributes = True
@@ -37,51 +59,522 @@ class ProductList(BaseModel):
     total: int
     page: int
     page_size: int
-    items: list[ProductItem]
+    items: List[ProductItem]
 
 
-@router.get("", response_model=ProductList)
-def list_products(
+class CategoryProduct(BaseModel):
+    cat_id: int
+    cat_name: str
+    prod_count: int
+    products: List[ProductItem]
+
+
+@router.get("/list", response_model=dict)
+def list_products_by_category(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    status: Optional[str] = None,
+    category_ids: Optional[str] = Query(None, description="Comma-separated category IDs to expand"),
 ):
-    return ProductList(
-        total=0,
-        page=page,
-        page_size=page_size,
-        items=[],
-    )
+    """
+    List products organized by category.
+    Mirrors Product_listView functionality.
+    """
+    try:
+        prod_list = {}
+        if category_ids:
+            prod_list = {cid.strip(): '1' for cid in category_ids.split(',') if cid.strip()}
+
+        prod_list_query = ""
+        if prod_list:
+            cat_ids_str = ",".join(str(k) for k in prod_list.keys())
+            prod_list_query = f"c.cat_id IN ({cat_ids_str}) OR "
+
+        # Get products
+        query = text(f"""
+            SELECT p.prod_name, p.is_parent, p.parent, p.prod_id, p.inactive, p.sku,
+                   p.has_attributes, p.special_start, p.special_stop, p.free_special, p.ext_id,
+                   c.cat_id, c.prod_order, c.weight
+            FROM products AS p
+            LEFT JOIN cat_prod_link AS c ON p.prod_id = c.prod_id
+            WHERE (p.inactive != 'd' OR p.inactive IS NULL)
+            AND (p.parent = '' OR p.parent IS NULL OR p.parent = 0)
+            AND ({prod_list_query}c.cat_id IS NULL)
+            ORDER BY c.cat_id, c.prod_order, p.prod_id
+        """)
+
+        results = db.execute(query).fetchall()
+
+        # Get categories
+        cat_query = text("""
+            SELECT cat_id, cat_name, rank, inactive
+            FROM categories
+            ORDER BY cat_parent, rank, cat_name
+        """)
+        cat_results = db.execute(cat_query).fetchall()
+
+        # Get product counts
+        count_query = text("""
+            SELECT COUNT(p.prod_id) as prod_count, cpl.cat_id
+            FROM cat_prod_link AS cpl
+            JOIN products AS p ON p.prod_id = cpl.prod_id
+            WHERE (p.inactive != 'd' OR p.inactive IS NULL)
+            AND (p.parent = 0 OR p.parent IS NULL)
+            GROUP BY cpl.cat_id
+        """)
+        count_results = db.execute(count_query).fetchall()
+        counts = {r.cat_id: r.prod_count for r in count_results}
+
+        # Build category structure
+        categories = []
+        for cat in cat_results:
+            cat_products = [r for r in results if r.cat_id == cat.cat_id]
+            category_item = {
+                "cat_id": cat.cat_id,
+                "name": cat.cat_name,
+                "rank": cat.rank,
+                "inactive": cat.inactive,
+                "product_count": counts.get(cat.cat_id, 0),
+                "products": [
+                    {
+                        "prod_id": p.prod_id,
+                        "prod_name": p.prod_name,
+                        "sku": p.sku,
+                        "is_parent": p.is_parent,
+                        "parent": p.parent,
+                        "inactive": p.inactive,
+                        "has_attributes": p.has_attributes,
+                        "special_start": p.special_start,
+                        "special_stop": p.special_stop,
+                        "free_special": p.free_special,
+                        "ext_id": p.ext_id,
+                        "prod_order": p.prod_order,
+                        "weight": p.weight,
+                    }
+                    for p in cat_products
+                ]
+            }
+            if prod_list.get(cat.cat_id):
+                category_item["expanded"] = True
+            categories.append(category_item)
+
+        return {
+            "categories": categories,
+            "total": len(results),
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.get("/by-name", response_model=dict)
+def list_products_by_name(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    sort: Optional[str] = Query("prod_name", description="Sort field"),
+    search_term: Optional[str] = Query(None, description="Search term"),
+    search_type: Optional[str] = Query(None, description="Type of search"),
+):
+    """
+    List all products alphabetically or by search criteria.
+    Mirrors Product_by_nameView functionality.
+    """
+    try:
+        query = text("""
+            SELECT prod_id, sku, prod_name, is_parent, inactive, has_attributes
+            FROM products
+            WHERE (inactive != 'd' OR inactive IS NULL)
+            AND (parent = '' OR parent IS NULL OR parent = 0)
+        """)
+
+        # Apply search filters if provided
+        if search_type == 'search' and search_term:
+            search_pattern = f"%{search_term}%"
+            query = text("""
+                SELECT prod_id, sku, prod_name, is_parent, inactive, has_attributes
+                FROM products
+                WHERE (inactive != 'd' OR inactive IS NULL)
+                AND (parent = '' OR parent IS NULL OR parent = 0)
+                AND (prod_name LIKE :search OR sku LIKE :search OR ext_id LIKE :search)
+                ORDER BY """ + sort)
+            results = db.execute(query, {"search": search_pattern}).fetchall()
+        elif search_type == 'type' and search_term:
+            if search_term == 'featured':
+                query = text("""
+                    SELECT prod_id, sku, prod_name, is_parent, inactive, has_attributes
+                    FROM products
+                    WHERE (inactive != 'd' OR inactive IS NULL)
+                    AND (parent = '' OR parent IS NULL OR parent = 0)
+                    AND featured = 'y'
+                    ORDER BY """ + sort)
+            elif search_term == 'special':
+                query = text("""
+                    SELECT prod_id, sku, prod_name, is_parent, inactive, has_attributes
+                    FROM products
+                    WHERE (inactive != 'd' OR inactive IS NULL)
+                    AND (parent = '' OR parent IS NULL OR parent = 0)
+                    AND ((NOW() BETWEEN special_start AND special_stop) OR special_ongoing = 'y')
+                    ORDER BY """ + sort)
+            elif search_term == 'new':
+                query = text("""
+                    SELECT prod_id, sku, prod_name, is_parent, inactive, has_attributes
+                    FROM products
+                    WHERE (inactive != 'd' OR inactive IS NULL)
+                    AND (parent = '' OR parent IS NULL OR parent = 0)
+                    AND new = 'y'
+                    ORDER BY """ + sort)
+            elif search_term == 'active':
+                query = text("""
+                    SELECT prod_id, sku, prod_name, is_parent, inactive, has_attributes
+                    FROM products
+                    WHERE (inactive != 'd' AND inactive != 'y')
+                    AND (parent = '' OR parent IS NULL OR parent = 0)
+                    ORDER BY """ + sort)
+            elif search_term == 'inactive':
+                query = text("""
+                    SELECT prod_id, sku, prod_name, is_parent, inactive, has_attributes
+                    FROM products
+                    WHERE (inactive != 'd' OR inactive IS NULL)
+                    AND (parent = '' OR parent IS NULL OR parent = 0)
+                    AND inactive = 'y'
+                    ORDER BY """ + sort)
+            results = db.execute(query).fetchall()
+        else:
+            query = text(f"""
+                SELECT prod_id, sku, prod_name, is_parent, inactive, has_attributes
+                FROM products
+                WHERE (inactive != 'd' OR inactive IS NULL)
+                AND (parent = '' OR parent IS NULL OR parent = 0)
+                ORDER BY {sort}
+            """)
+            results = db.execute(query).fetchall()
+
+        products = [
+            {
+                "prod_id": r.prod_id,
+                "sku": r.sku,
+                "prod_name": r.prod_name,
+                "is_parent": r.is_parent,
+                "inactive": r.inactive,
+                "has_attributes": r.has_attributes,
+            }
+            for r in results
+        ]
+
+        return {
+            "products": products,
+            "total": len(products),
+            "sort": sort,
+            "search_type": search_type,
+            "search_term": search_term,
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.get("/search", response_model=dict)
+def search_products(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    q: str = Query("", min_length=0),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """
+    Search products by name, SKU, or external ID.
+    Mirrors Product_searchView functionality.
+    """
+    try:
+        if not q:
+            return {"results": [], "total": 0, "query": q}
+
+        search_pattern = f"%{q}%"
+        query = text("""
+            SELECT prod_id, sku, prod_name, is_parent, parent, inactive, ext_id
+            FROM products
+            WHERE (inactive != 'd' OR inactive IS NULL)
+            AND (parent = '' OR parent IS NULL OR parent = 0)
+            AND (prod_name LIKE :search OR sku LIKE :search OR ext_id LIKE :search)
+            LIMIT :limit
+        """)
+
+        results = db.execute(query, {"search": search_pattern, "limit": limit}).fetchall()
+
+        products = [
+            {
+                "prod_id": r.prod_id,
+                "sku": r.sku,
+                "prod_name": r.prod_name,
+                "is_parent": r.is_parent,
+                "parent": r.parent,
+                "inactive": r.inactive,
+                "ext_id": r.ext_id,
+            }
+            for r in results
+        ]
+
+        return {
+            "results": products,
+            "total": len(products),
+            "query": q,
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
 
 
 @router.get("/{product_id}", response_model=ProductDetail)
 def get_product(
-    product_id: int,
+    product_id: int = Path(..., gt=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return {
-        "id": product_id,
-        "name": "Product Not Found",
-        "sku": None,
-        "price": 0.0,
-        "description": None,
-        "status": "unknown",
-        "created_at": None,
-    }
+    """
+    Get detailed product information.
+    """
+    try:
+        query = text("""
+            SELECT prod_id, prod_name, sku, description, is_parent, parent, inactive,
+                   has_attributes, special_start, special_stop, free_special, ext_id,
+                   retail, wholesale, featured, new, date_added, date_modified
+            FROM products
+            WHERE prod_id = :prod_id
+        """)
+
+        result = db.execute(query, {"prod_id": product_id}).fetchone()
+
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+
+        # Format dates
+        date_added = ""
+        date_modified = ""
+        if result.date_added:
+            try:
+                date_added = result.date_added.strftime("%m/%d/%Y %H:%M:%S") if hasattr(result.date_added, 'strftime') else str(result.date_added)
+            except:
+                date_added = str(result.date_added)
+        if result.date_modified:
+            try:
+                date_modified = result.date_modified.strftime("%m/%d/%Y %H:%M:%S") if hasattr(result.date_modified, 'strftime') else str(result.date_modified)
+            except:
+                date_modified = str(result.date_modified)
+
+        return {
+            "prod_id": result.prod_id,
+            "prod_name": result.prod_name,
+            "sku": result.sku,
+            "description": result.description,
+            "is_parent": result.is_parent,
+            "parent": result.parent,
+            "inactive": result.inactive,
+            "has_attributes": result.has_attributes,
+            "special_start": result.special_start,
+            "special_stop": result.special_stop,
+            "free_special": result.free_special,
+            "ext_id": result.ext_id,
+            "retail": result.retail,
+            "wholesale": result.wholesale,
+            "featured": result.featured,
+            "new": result.new,
+            "date_added": date_added,
+            "date_modified": date_modified,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
 
 
-@router.get("/search/by-name")
-def search_products(
+@router.post("/", status_code=status.HTTP_201_CREATED)
+def create_product(
+    product: dict,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    q: str = Query("", min_length=1),
-    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_admin_user),
 ):
-    return {
-        "query": q,
-        "total": 0,
-        "items": [],
-    }
+    """
+    Create a new product.
+    """
+    try:
+        # Insert product
+        insert_query = text("""
+            INSERT INTO products (prod_name, sku, description, is_parent, parent,
+                                inactive, has_attributes, special_start, special_stop,
+                                free_special, ext_id, retail, wholesale, featured, new,
+                                date_added, date_modified)
+            VALUES (:prod_name, :sku, :description, :is_parent, :parent,
+                   :inactive, :has_attributes, :special_start, :special_stop,
+                   :free_special, :ext_id, :retail, :wholesale, :featured, :new,
+                   NOW(), NOW())
+        """)
+
+        db.execute(insert_query, product)
+        db.commit()
+
+        return {"message": "Product created successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.put("/{product_id}")
+def update_product(
+    product_id: int = Path(..., gt=0),
+    product: dict = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Update an existing product.
+    """
+    try:
+        # Check if product exists
+        check_query = text("SELECT prod_id FROM products WHERE prod_id = :prod_id")
+        if not db.execute(check_query, {"prod_id": product_id}).fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+
+        # Build update query dynamically
+        update_fields = []
+        params = {"prod_id": product_id, "date_modified": datetime.now()}
+
+        if product:
+            for key, value in product.items():
+                if key not in ['prod_id', 'date_added']:
+                    update_fields.append(f"{key} = :{key}")
+                    params[key] = value
+
+        update_fields.append("date_modified = :date_modified")
+
+        update_query = text(f"""
+            UPDATE products
+            SET {', '.join(update_fields)}
+            WHERE prod_id = :prod_id
+        """)
+
+        db.execute(update_query, params)
+        db.commit()
+
+        return {"message": "Product updated successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.delete("/{product_id}")
+def delete_product(
+    product_id: int = Path(..., gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Delete (mark as deleted) a product.
+    """
+    try:
+        # Mark as deleted (soft delete)
+        update_query = text("""
+            UPDATE products
+            SET inactive = 'd', date_modified = NOW()
+            WHERE prod_id = :prod_id
+        """)
+
+        result = db.execute(update_query, {"prod_id": product_id})
+
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+
+        db.commit()
+
+        return {"message": "Product deleted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.post("/{product_id}/copy")
+def copy_product(
+    product_id: int = Path(..., gt=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Copy an existing product.
+    Mirrors Product_copyView functionality.
+    """
+    try:
+        # Get original product
+        query = text("""
+            SELECT * FROM products WHERE prod_id = :prod_id
+        """)
+
+        result = db.execute(query, {"prod_id": product_id}).fetchone()
+
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+
+        # Create copy with new name
+        insert_query = text("""
+            INSERT INTO products (prod_name, sku, description, is_parent, parent,
+                                inactive, has_attributes, special_start, special_stop,
+                                free_special, ext_id, retail, wholesale, featured, new,
+                                date_added, date_modified)
+            SELECT CONCAT(prod_name, ' (Copy)'), sku, description, is_parent, parent,
+                   inactive, has_attributes, special_start, special_stop,
+                   free_special, ext_id, retail, wholesale, featured, new,
+                   NOW(), NOW()
+            FROM products
+            WHERE prod_id = :prod_id
+        """)
+
+        db.execute(insert_query, {"prod_id": product_id})
+        db.commit()
+
+        return {"message": "Product copied successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )

@@ -3,83 +3,98 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-interface ReferrerRecord {
-  referrer_url: string;
+interface ReferrerItem {
+  referrer: string;
   visits: number;
-  orders: number;
   revenue: number;
-  conversion_rate: number;
+  orders: number;
 }
 
-interface ReferrersData {
-  records: ReferrerRecord[];
+interface Report {
+  period: string;
+  total_referrers: number;
+  items: ReferrerItem[];
 }
 
 export default function ReferrersPage() {
-  const [data, setData] = useState<ReferrersData | null>(null);
+  const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState('month');
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await api.get('/reports/referrers');
-        setData(response.data.data);
-      } catch (err: any) {
-        setError(err.response?.data?.message || 'Failed to load referrer data');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
+    fetchReport();
+  }, [period]);
+
+  const fetchReport = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get(`/reports/referrers?period=${period}`);
+      setReport(response.data);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to fetch referrers:', err);
+      setError('Failed to load referrers report');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div>
-      <div className="row">
-        <div className="col-lg-12">
-          <h1>Referrer Tracking Report</h1>
-          <p>
-            <i className="fa fa-info-circle"></i> Track traffic sources and referrer performance.
-          </p>
-        </div>
-      </div>
-      <br />
+    <div className="container-fluid" style={{ padding: '20px' }}>
+      <h1>Referrers Report</h1>
 
-      {error && <div className="alert alert-danger">{error}</div>}
-      {loading && <p>Loading referrer data...</p>}
-
-      {!loading && data && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="well well-cv3-table">
-              <div className="table-responsive">
-                <table className="table table-hover table-striped cv3-data-table">
-                  <thead>
-                    <tr>
-                      <th>Referrer URL</th>
-                      <th className="text-center">Visits</th>
-                      <th className="text-center">Orders</th>
-                      <th className="text-center">Revenue</th>
-                      <th className="text-center">Conversion Rate</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.records.map((record, idx) => (
-                      <tr key={idx}>
-                        <td>{record.referrer_url}</td>
-                        <td align="center">{record.visits}</td>
-                        <td align="center">{record.orders}</td>
-                        <td align="center">${record.revenue.toFixed(2)}</td>
-                        <td align="center">{(record.conversion_rate * 100).toFixed(2)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+      <div className="panel panel-default" style={{ marginBottom: '20px' }}>
+        <div className="panel-body">
+          <div className="btn-group" role="group">
+            {['day', 'week', 'month', 'year'].map((p) => (
+              <button
+                key={p}
+                className={`btn ${period === p ? 'btn-primary' : 'btn-default'}`}
+                onClick={() => setPeriod(p)}
+              >
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </button>
+            ))}
           </div>
         </div>
+      </div>
+
+      {error && <div className="alert alert-danger">{error}</div>}
+      {loading && <div className="alert alert-info">Loading report...</div>}
+
+      {!loading && report && (
+        <div className="panel panel-default">
+          <div className="panel-heading">
+            <h3 className="panel-title">Traffic Sources ({report.total_referrers})</h3>
+          </div>
+          <div className="table-responsive">
+            <table className="table table-striped table-hover">
+              <thead>
+                <tr>
+                  <th>Referrer</th>
+                  <th>Visits</th>
+                  <th>Orders</th>
+                  <th>Revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.items.map((item, index) => (
+                  <tr key={index}>
+                    <td>{item.referrer}</td>
+                    <td>{item.visits}</td>
+                    <td>{item.orders}</td>
+                    <td>${item.revenue.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!loading && report && report.items.length === 0 && (
+        <div className="alert alert-info">No referrer data for the selected period.</div>
       )}
     </div>
   );

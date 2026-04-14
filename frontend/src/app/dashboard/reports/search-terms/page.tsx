@@ -3,80 +3,98 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-interface SearchTermRecord {
+interface SearchTermItem {
   search_term: string;
-  frequency: number;
-  unique_searches: number;
-  conversion_rate: number;
+  searches: number;
+  results_found: number;
+  orders: number;
 }
 
-interface SearchTermsData {
-  records: SearchTermRecord[];
+interface Report {
+  period: string;
+  total_searches: number;
+  items: SearchTermItem[];
 }
 
 export default function SearchTermsPage() {
-  const [data, setData] = useState<SearchTermsData | null>(null);
+  const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState('month');
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await api.get('/reports/search-terms');
-        setData(response.data.data);
-      } catch (err: any) {
-        setError(err.response?.data?.message || 'Failed to load search terms');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
+    fetchReport();
+  }, [period]);
+
+  const fetchReport = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get(`/reports/search-terms?period=${period}`);
+      setReport(response.data);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to fetch search terms:', err);
+      setError('Failed to load search terms report');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div>
-      <div className="row">
-        <div className="col-lg-12">
-          <h1>Search Terms Report</h1>
-          <p>
-            <i className="fa fa-info-circle"></i> View the most common search terms used on your site.
-          </p>
-        </div>
-      </div>
-      <br />
+    <div className="container-fluid" style={{ padding: '20px' }}>
+      <h1>Search Terms Report</h1>
 
-      {error && <div className="alert alert-danger">{error}</div>}
-      {loading && <p>Loading search terms...</p>}
-
-      {!loading && data && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="well well-cv3-table">
-              <div className="table-responsive">
-                <table className="table table-hover table-striped cv3-data-table">
-                  <thead>
-                    <tr>
-                      <th>Search Term</th>
-                      <th className="text-center">Frequency</th>
-                      <th className="text-center">Unique Searches</th>
-                      <th className="text-center">Conversion Rate</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.records.map((record, idx) => (
-                      <tr key={idx}>
-                        <td>{record.search_term}</td>
-                        <td align="center">{record.frequency}</td>
-                        <td align="center">{record.unique_searches}</td>
-                        <td align="center">{(record.conversion_rate * 100).toFixed(2)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+      <div className="panel panel-default" style={{ marginBottom: '20px' }}>
+        <div className="panel-body">
+          <div className="btn-group" role="group">
+            {['day', 'week', 'month', 'year'].map((p) => (
+              <button
+                key={p}
+                className={`btn ${period === p ? 'btn-primary' : 'btn-default'}`}
+                onClick={() => setPeriod(p)}
+              >
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </button>
+            ))}
           </div>
         </div>
+      </div>
+
+      {error && <div className="alert alert-danger">{error}</div>}
+      {loading && <div className="alert alert-info">Loading report...</div>}
+
+      {!loading && report && (
+        <div className="panel panel-default">
+          <div className="panel-heading">
+            <h3 className="panel-title">Popular Search Terms (Total: {report.total_searches})</h3>
+          </div>
+          <div className="table-responsive">
+            <table className="table table-striped table-hover">
+              <thead>
+                <tr>
+                  <th>Search Term</th>
+                  <th>Searches</th>
+                  <th>Found Results</th>
+                  <th>Orders</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.items.map((item, index) => (
+                  <tr key={index}>
+                    <td>{item.search_term}</td>
+                    <td>{item.searches}</td>
+                    <td>{item.results_found}</td>
+                    <td>{item.orders}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!loading && report && report.items.length === 0 && (
+        <div className="alert alert-info">No search term data for the selected period.</div>
       )}
     </div>
   );

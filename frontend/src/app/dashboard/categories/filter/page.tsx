@@ -1,19 +1,21 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { Container, Row, Col, Button, Table, Alert, Spinner, Card, Badge, Form } from 'react-bootstrap';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import Link from 'next/link';
 
 interface Filter {
-  id: string;
-  name: string;
-  category_name: string;
+  filter_id: number;
+  filter_label: string;
+  filter_name: string;
 }
 
 export default function CategoryFilterPage() {
-  const [filters, setFilters] = useState<Filter[]>([]);
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<Filter[]>([]);
 
   useEffect(() => {
     fetchFilters();
@@ -22,68 +24,101 @@ export default function CategoryFilterPage() {
   const fetchFilters = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/categories/filters');
-      setFilters(response.data.data || []);
+      setError(null);
+      const response = await api.get('/categories/filters/list');
+      setFilters(response.data.filters || []);
     } catch (err) {
-      setError('Failed to load filters');
+      setError(err instanceof Error ? err.message : 'Failed to fetch filters');
     } finally {
       setLoading(false);
     }
   };
 
+  if (loading) {
+    return (
+      <Container className="mt-4" fluid>
+        <Spinner animation="border" />
+      </Container>
+    );
+  }
+
   return (
-    <div>
-      <div className="row">
-        <div className="col-lg-12">
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
           <h1>Category Filters</h1>
-          <p><i className="fa fa-filter"></i> Manage category filters.</p>
-        </div>
-      </div>
-      <br />
+        </Col>
+        <Col xs="auto">
+          <Button
+            variant="success"
+            onClick={() => router.push('/dashboard/categories/filter/add')}
+          >
+            <i className="fa fa-plus"></i> Add Filter
+          </Button>{' '}
+          <Button variant="primary" onClick={() => router.push('/dashboard/categories/list')}>
+            <i className="fa fa-arrow-left"></i> Back to Categories
+          </Button>
+        </Col>
+      </Row>
 
-      {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
-          </div>
-        </div>
-      )}
+      {error && <Alert variant="danger">{error}</Alert>}
 
-      {loading ? (
-        <p>Loading...</p>
-      ) : (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="panel panel-default">
-              <div className="panel-heading">
-                <h3 className="panel-title">Filters ({filters.length})</h3>
-              </div>
-              <div className="panel-body">
-                {filters.length === 0 ? (
-                  <p className="text-muted">No filters found.</p>
-                ) : (
-                  <table className="table table-hover table-striped">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>Category</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filters.map(filter => (
-                        <tr key={filter.id}>
-                          <td>{filter.name}</td>
-                          <td>{filter.category_name}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <Card>
+        <Card.Body>
+          {filters.length === 0 ? (
+            <Alert variant="info">No filters found</Alert>
+          ) : (
+            <Table hover>
+              <thead>
+                <tr>
+                  <th>Filter Label</th>
+                  <th>Filter Name</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filters.map((filter) => (
+                  <tr key={filter.filter_id}>
+                    <td>{filter.filter_label}</td>
+                    <td>{filter.filter_name}</td>
+                    <td>
+                      <Button
+                        variant="sm"
+                        className="me-1"
+                        onClick={() =>
+                          router.push(`/dashboard/categories/filter/edit/${filter.filter_id}`)
+                        }
+                      >
+                        <i className="fa fa-edit"></i>
+                      </Button>
+                      <Button
+                        variant="sm"
+                        variant="danger"
+                        onClick={() => {
+                          if (confirm('Are you sure?')) {
+                            deleteFilter(filter.filter_id);
+                          }
+                        }}
+                      >
+                        <i className="fa fa-trash"></i>
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+        </Card.Body>
+      </Card>
+    </Container>
   );
 }
+
+const deleteFilter = async (filterId: number) => {
+  try {
+    await api.delete(`/categories/filters/${filterId}`);
+    window.location.reload();
+  } catch (err) {
+    console.error('Failed to delete filter');
+  }
+};

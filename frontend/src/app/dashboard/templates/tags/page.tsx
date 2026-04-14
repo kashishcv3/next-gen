@@ -1,120 +1,86 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { Container, Row, Col, Button, Table, Alert, Spinner, Card, Badge, Tabs, Tab } from 'react-bootstrap';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import Link from 'next/link';
 
-interface Item {
-  id: string;
+interface Tag {
   name: string;
-  status?: string;
-  created_at?: string;
+  category: string;
 }
 
-export default function ListPage() {
-  const [items, setItems] = useState<Item[]>([]);
+export default function TemplateTagsPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [tags, setTags] = useState<Record<string, Tag[]>>({});
 
   useEffect(() => {
-    fetchItems();
+    fetchTags();
   }, []);
 
-  const fetchItems = async (searchTerm?: string) => {
+  const fetchTags = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      if (searchTerm) params.append('search', searchTerm);
-
-      const response = await api.get(`/templates/tags?${params.toString()}`);
-      setItems(response.data.data || []);
+      setError(null);
+      const response = await api.get('/templates/tags');
+      setTags(response.data.tags || {});
     } catch (err) {
-      console.error('Error:', err);
-      setError('Failed to load items');
+      setError(err instanceof Error ? err.message : 'Failed to fetch tags');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSearch = () => {
-    fetchItems(search);
-  };
+  if (loading) {
+    return (
+      <Container className="mt-4" fluid>
+        <Spinner animation="border" />
+      </Container>
+    );
+  }
 
-  const formatDate = (dateString: string) => {
-    try {
-      return new Date(dateString).toLocaleDateString();
-    } catch {
-      return dateString;
-    }
-  };
-
-  if (loading) return <div className="alert alert-info">Loading...</div>;
-  if (error) return <div className="alert alert-danger">{error}</div>;
+  const categories = Object.keys(tags);
 
   return (
-    <div className="container-fluid" style={{ padding: '20px'}}>
-      <h1>Template Tags</h1>
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
+          <h1>Template Tags</h1>
+        </Col>
+        <Col xs="auto">
+          <Button
+            variant="success"
+            onClick={() => router.push('/dashboard/templates/tags/add')}
+          >
+            <i className="fa fa-plus"></i> Add Tag
+          </Button>{' '}
+          <Button variant="primary" onClick={() => router.push('/dashboard/templates/list')}>
+            <i className="fa fa-arrow-left"></i> Back to Templates
+          </Button>
+        </Col>
+      </Row>
 
-      <div className="panel panel-default" style={{ marginBottom: '20px'}}>
-        <div className="panel-body">
-          <div className="row">
-            <div className="col-md-6">
-              <input
-                type="text"
-                className="form-control"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search..."
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              />
-            </div>
-            <div className="col-md-6">
-              <button className="btn btn-primary" onClick={handleSearch}>
-                <i className="fa fa-search"></i> Search
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      {error && <Alert variant="danger">{error}</Alert>}
 
-      <div className="panel panel-default">
-        <div className="panel-heading">
-          <h3 className="panel-title">Items ({items.length})</h3>
-        </div>
-        {items.length > 0 ? (
-          <div className="table-responsive">
-            <table className="table table-striped table-hover">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th style={{ width: '120px'}}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.name}</td>
-                    <td>{item.status || 'N/A'}</td>
-                    <td>{item.created_at ? formatDate(item.created_at) : 'N/A'}</td>
-                    <td>
-                      <Link href={`/templates/tags/view/${item.id}`} className="btn btn-xs btn-primary">
-                        View
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="panel-body">
-            <p>No items found.</p>
-          </div>
-        )}
-      </div>
-    </div>
+      <Card>
+        <Card.Body>
+          <Tabs id="tag-tabs" defaultActiveKey={categories[0] || 'general'}>
+            {categories.map((category) => (
+              <Tab eventKey={category} title={category} key={category}>
+                <div className="mt-3">
+                  {tags[category].map((tag, idx) => (
+                    <Badge bg="secondary" key={idx} className="me-2 mb-2">
+                      {tag.name}
+                    </Badge>
+                  ))}
+                </div>
+              </Tab>
+            ))}
+          </Tabs>
+        </Card.Body>
+      </Card>
+    </Container>
   );
 }

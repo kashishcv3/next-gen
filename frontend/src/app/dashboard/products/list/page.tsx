@@ -1,31 +1,36 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { Container, Row, Col, Button, Table, Form, Alert, Spinner, Card, Badge } from 'react-bootstrap';
+import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import Link from 'next/link';
-
-interface Category {
-  id: string;
-  name: string;
-  parent_id: string | null;
-  product_count: number;
-  children?: Category[];
-}
 
 interface Product {
-  id: string;
-  name: string;
+  prod_id: number;
+  prod_name: string;
   sku: string;
-  price: string;
+  is_parent: string;
+  inactive: string;
+  has_attributes: string;
+  prod_order: number;
+  weight: number;
 }
 
-export default function ProductListPage() {
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+interface Category {
+  cat_id: number;
+  name: string;
+  rank: number;
+  product_count: number;
+  products: Product[];
+  expanded: boolean;
+}
+
+export default function ProductsListPage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortField, setSortField] = useState('name');
-  const [sortOrder, setSortOrder] = useState('asc');
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     fetchCategories();
@@ -34,119 +39,145 @@ export default function ProductListPage() {
   const fetchCategories = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/products/categories?include_counts=1');
-      setCategories(response.data.data || []);
+      setError(null);
+      const response = await api.get('/products/list');
+      setCategories(response.data.categories || []);
     } catch (err) {
-      console.error('Failed to fetch categories:', err);
-      setError('Failed to load categories');
+      setError(err instanceof Error ? err.message : 'Failed to fetch products');
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleCategory = (categoryId: string) => {
+  const toggleCategory = (catId: number) => {
     const newExpanded = new Set(expandedCategories);
-    if (newExpanded.has(categoryId)) {
-      newExpanded.delete(categoryId);
+    if (newExpanded.has(catId)) {
+      newExpanded.delete(catId);
     } else {
-      newExpanded.add(categoryId);
+      newExpanded.add(catId);
     }
     setExpandedCategories(newExpanded);
   };
 
-  const renderCategoryTree = (cats: Category[], depth: number = 0) => {
-    return cats.map(category => (
-      <div key={category.id} style={{ marginLeft: `${depth * 20}px` }} className="list-group-item">
-        <div className="row">
-          <div className="col-md-6">
-            <button
-              className="btn btn-link"
-              onClick={() => toggleCategory(category.id)}
-              style={{ marginRight: '10px' }}
-            >
-              {expandedCategories.has(category.id) ? '▼' : '▶'}
-            </button>
-            <strong>{category.name}</strong>
-          </div>
-          <div className="col-md-2 text-center">
-            <span className="badge">{category.product_count}</span>
-          </div>
-          <div className="col-md-4 text-right">
-            <Link href={`/categories/edit/${category.id}`} className="btn btn-sm btn-default">
-              Edit
-            </Link>
-            <Link href={`/categories/delete/${category.id}`} className="btn btn-sm btn-danger">
-              Delete
-            </Link>
-          </div>
-        </div>
-        {expandedCategories.has(category.id) && category.children && category.children.length > 0 && (
-          <div>{renderCategoryTree(category.children, depth + 1)}</div>
-        )}
-      </div>
-    ));
-  };
+  if (loading) {
+    return (
+      <Container className="mt-4" fluid>
+        <Row>
+          <Col>
+            <Spinner animation="border" role="status">
+              <span className="visually-hidden">Loading...</span>
+            </Spinner>
+          </Col>
+        </Row>
+      </Container>
+    );
+  }
 
   return (
-    <div>
-      <div className="row">
-        <div className="col-lg-12">
-          <h1>Products</h1>
-          <p>
-            <i className="fa fa-info-circle"></i> View and manage your product catalog.
-          </p>
-        </div>
-      </div>
-      <br />
-
-      <div className="row">
-        <div className="col-lg-12">
-          <Link href="/products/add" className="btn btn-primary">
-            <i className="fa fa-plus"></i> Add Product
-          </Link>
-          <Link href="/products/search" className="btn btn-default">
+    <Container className="mt-4" fluid>
+      <Row className="mb-4">
+        <Col>
+          <h1>Products by Category</h1>
+        </Col>
+        <Col xs="auto">
+          <Button variant="primary" onClick={() => router.push('/dashboard/products/by-name')}>
+            <i className="fa fa-list"></i> By Name
+          </Button>{' '}
+          <Button variant="primary" onClick={() => router.push('/dashboard/products/search')}>
             <i className="fa fa-search"></i> Search
-          </Link>
-          <Link href="/products/import" className="btn btn-default">
+          </Button>{' '}
+          <Button variant="success" onClick={() => router.push('/dashboard/products/import')}>
             <i className="fa fa-upload"></i> Import
-          </Link>
-          <Link href="/products/export" className="btn btn-default">
+          </Button>{' '}
+          <Button variant="info" onClick={() => router.push('/dashboard/products/export')}>
             <i className="fa fa-download"></i> Export
-          </Link>
-        </div>
-      </div>
-      <br />
+          </Button>
+        </Col>
+      </Row>
 
-      {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
-          </div>
-        </div>
-      )}
+      {error && <Alert variant="danger">{error}</Alert>}
 
-      {loading ? (
-        <div className="row">
-          <div className="col-lg-12">
-            <p>Loading...</p>
-          </div>
-        </div>
-      ) : (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="panel panel-default">
-              <div className="panel-heading">
-                <h3 className="panel-title">Category Tree</h3>
-              </div>
-              <div className="panel-body">
-                <div className="list-group">
-                  {renderCategoryTree(categories)}
+      <Card>
+        <Card.Body>
+          {categories.length === 0 ? (
+            <Alert variant="info">No categories found</Alert>
+          ) : (
+            <div className="list-group">
+              {categories.map((category) => (
+                <div key={category.cat_id} className="mb-3">
+                  <div
+                    className="p-3 bg-light border"
+                    role="button"
+                    onClick={() => toggleCategory(category.cat_id)}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <div className="d-flex justify-content-between align-items-center">
+                      <div>
+                        <i
+                          className={`fa fa-chevron-${
+                            expandedCategories.has(category.cat_id) ? 'down' : 'right'
+                          }`}
+                        ></i>
+                        {' '}
+                        <strong>{category.name}</strong>
+                        {category.inactive && category.inactive !== 'n' && (
+                          <Badge bg="warning" className="ms-2">
+                            Inactive
+                          </Badge>
+                        )}
+                      </div>
+                      <Badge bg="secondary">{category.product_count || 0} products</Badge>
+                    </div>
+                  </div>
+
+                  {expandedCategories.has(category.cat_id) && category.products && (
+                    <Table hover size="sm" className="mb-0 mt-2">
+                      <thead>
+                        <tr>
+                          <th>Product Name</th>
+                          <th>SKU</th>
+                          <th>Type</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {category.products.map((product) => (
+                          <tr key={product.prod_id}>
+                            <td>{product.prod_name}</td>
+                            <td>{product.sku}</td>
+                            <td>
+                              {product.is_parent === 'y' && <Badge bg="info">Parent</Badge>}
+                              {product.has_attributes === 'y' && <Badge bg="info">Attributes</Badge>}
+                            </td>
+                            <td>
+                              {product.inactive && product.inactive !== 'n' ? (
+                                <Badge bg="danger">Inactive</Badge>
+                              ) : (
+                                <Badge bg="success">Active</Badge>
+                              )}
+                            </td>
+                            <td>
+                              <Button
+                                variant="sm"
+                                onClick={() =>
+                                  router.push(`/dashboard/products/edit/${product.prod_id}`)
+                                }
+                              >
+                                <i className="fa fa-edit"></i>
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  )}
                 </div>
-              </div>
+              ))}
             </div>
-          </div>
-        </div>
-      )}
-    </div>
+          )}
+        </Card.Body>
+      </Card>
+    </Container>
   );
 }

@@ -7,7 +7,7 @@ import Link from 'next/link';
 interface TaxTable {
   id: string;
   name: string;
-  type: string;
+  state: string;
   rate: number;
   created_at: string;
 }
@@ -47,7 +47,7 @@ export default function TaxListPage() {
       <div className="row">
         <div className="col-lg-12">
           <h1>Tax Tables</h1>
-          <p><i className="fa fa-info-circle"></i> Manage tax tables for your store.</p>
+          <p><i className="fa fa-info-circle"></i> Manage state tax rates.</p>
         </div>
       </div>
       <br />
@@ -56,7 +56,7 @@ export default function TaxListPage() {
 
       <div className="row">
         <div className="col-lg-12">
-          <Link href="/tax/add" className="btn btn-primary"><i className="fa fa-plus"></i> Add Tax Table</Link>
+          <Link href="/dashboard/tax/add" className="btn btn-primary"><i className="fa fa-plus"></i> Add Tax Table</Link>
         </div>
       </div>
       <br />
@@ -71,19 +71,18 @@ export default function TaxListPage() {
               <div className="table-responsive">
                 <table className="table table-striped table-hover">
                   <thead>
-                    <tr><th>Name</th><th>Type</th><th>Rate</th><th>Created</th><th>Actions</th></tr>
+                    <tr><th>Name</th><th>State</th><th>Rate (%)</th><th>Created</th><th>Actions</th></tr>
                   </thead>
                   <tbody>
                     {tables.length > 0 ? tables.map(table => (
                       <tr key={table.id}>
                         <td>{table.name}</td>
-                        <td>{table.type}</td>
-                        <td>{table.rate}%</td>
+                        <td>{table.state}</td>
+                        <td>{(table.rate * 100).toFixed(2)}</td>
                         <td>{new Date(table.created_at).toLocaleDateString()}</td>
                         <td>
-                          <button className="btn btn-xs btn-danger" onClick={() => handleDelete(table.id)}>
-                            <i className="fa fa-trash"></i> Delete
-                          </button>
+                          <Link href={`/dashboard/tax/edit/${table.id}`} className="btn btn-xs btn-info"><i className="fa fa-edit"></i></Link>
+                          <button className="btn btn-xs btn-danger" onClick={() => handleDelete(table.id)}><i className="fa fa-trash"></i></button>
                         </td>
                       </tr>
                     )) : (
