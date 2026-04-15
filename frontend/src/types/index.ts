@@ -1,11 +1,17 @@
 export interface User {
   id: string;
+  uid?: number;
   email: string;
   name: string;
+  username?: string;
+  user_type?: string;
   role: string;
   permissions: string[];
   store_id?: string;
   is_developer?: boolean;
+  first_name?: string;
+  last_name?: string;
+  in_cloud?: boolean;
 }
 
 export interface AuthState {

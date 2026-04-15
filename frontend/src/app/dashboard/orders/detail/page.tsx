@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Container, Row, Col, Button, Table, Form, Alert, Spinner } from 'react-bootstrap';
+import { Container, Row, Col, Button, Table, Form, Alert, Spinner } from '@/lib/react-bootstrap';
 import { useRouter } from 'next/navigation';
 
 interface PageProps {

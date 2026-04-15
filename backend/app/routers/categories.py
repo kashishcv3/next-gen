@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional, List, Dict
-from app.database import get_db
+from app.database import get_db, get_store_db_name, get_store_session
 from app.models.user import User
 from app.dependencies import get_current_user, get_current_admin_user
 from datetime import datetime
@@ -51,6 +51,7 @@ class CategoryList(BaseModel):
 
 @router.get("/list", response_model=dict)
 def list_categories(
+    site_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -58,15 +59,25 @@ def list_categories(
     List all categories with hierarchical structure.
     Mirrors Category_listView functionality.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         # Get categories
         query = text("""
-            SELECT cat_id, cat_name, url_name, linked_to, rank, inactive, cat_parent
+            SELECT cat_id, cat_name, url_name, linked_to, `rank`, inactive, cat_parent
             FROM categories
-            ORDER BY cat_parent, rank, cat_name
+            ORDER BY cat_parent, `rank`, cat_name
         """)
 
-        results = db.execute(query).fetchall()
+        results = store_db.execute(query).fetchall()
 
         # Get product counts
         count_query = text("""
@@ -78,7 +89,7 @@ def list_categories(
             GROUP BY cpl.cat_id
         """)
 
-        count_results = db.execute(count_query).fetchall()
+        count_results = store_db.execute(count_query).fetchall()
         counts = {r.cat_id: r.prod_count for r in count_results}
 
         # Build hierarchical structure
@@ -133,16 +144,22 @@ def list_categories(
             "parent_cat_ids": list(parent_cat_ids),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.get("/{category_id}", response_model=CategoryDetail)
 def get_category(
     category_id: int = Path(..., gt=0),
+    site_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -150,7 +167,17 @@ def get_category(
     Get detailed category information.
     Mirrors Category_editView functionality.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         query = text("""
             SELECT cat_id, cat_name, url_name, cat_description, description, inactive,
                    template, meta_title, meta_keywords, featured, related_cats,
@@ -159,7 +186,7 @@ def get_category(
             WHERE cat_id = :cat_id
         """)
 
-        result = db.execute(query, {"cat_id": category_id}).fetchone()
+        result = store_db.execute(query, {"cat_id": category_id}).fetchone()
 
         if not result:
             raise HTTPException(
@@ -199,11 +226,15 @@ def get_category(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 def create_category(
-    category: dict,
+    site_id: int = Query(...),
+    category: dict = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
@@ -211,34 +242,51 @@ def create_category(
     Create a new category.
     Mirrors Category_addView functionality.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         insert_query = text("""
             INSERT INTO categories (cat_name, url_name, cat_description, description,
                                    inactive, template, meta_title, meta_keywords,
                                    featured, related_cats, prods_per_page, linked_to,
-                                   cat_parent, rank, date_modified)
+                                   cat_parent, `rank`, date_modified)
             VALUES (:cat_name, :url_name, :cat_description, :description,
                    :inactive, :template, :meta_title, :meta_keywords,
                    :featured, :related_cats, :prods_per_page, :linked_to,
                    :cat_parent, :rank, NOW())
         """)
 
-        db.execute(insert_query, category)
-        db.commit()
+        store_db.execute(insert_query, category)
+        store_db.commit()
 
         return {"message": "Category created successfully"}
 
+    except HTTPException:
+        raise
     except Exception as e:
-        db.rollback()
+        if store_db:
+            store_db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.put("/{category_id}")
 def update_category(
     category_id: int = Path(..., gt=0),
+    site_id: int = Query(...),
     category: dict = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
@@ -246,10 +294,20 @@ def update_category(
     """
     Update an existing category.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         # Check if category exists
         check_query = text("SELECT cat_id FROM categories WHERE cat_id = :cat_id")
-        if not db.execute(check_query, {"cat_id": category_id}).fetchone():
+        if not store_db.execute(check_query, {"cat_id": category_id}).fetchone():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Category not found"
@@ -273,34 +331,49 @@ def update_category(
             WHERE cat_id = :cat_id
         """)
 
-        db.execute(update_query, params)
-        db.commit()
+        store_db.execute(update_query, params)
+        store_db.commit()
 
         return {"message": "Category updated successfully"}
 
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        if store_db:
+            store_db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.delete("/{category_id}")
 def delete_category(
     category_id: int = Path(..., gt=0),
+    site_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
     """
     Delete (mark as deleted) a category.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         # Check if category exists
         check_query = text("SELECT cat_id FROM categories WHERE cat_id = :cat_id")
-        if not db.execute(check_query, {"cat_id": category_id}).fetchone():
+        if not store_db.execute(check_query, {"cat_id": category_id}).fetchone():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Category not found"
@@ -313,23 +386,28 @@ def delete_category(
             WHERE cat_id = :cat_id
         """)
 
-        db.execute(update_query, {"cat_id": category_id})
-        db.commit()
+        store_db.execute(update_query, {"cat_id": category_id})
+        store_db.commit()
 
         return {"message": "Category deleted successfully"}
 
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        if store_db:
+            store_db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.get("/filters/list", response_model=dict)
 def list_category_filters(
+    site_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -337,7 +415,17 @@ def list_category_filters(
     List category filters for refined search.
     Mirrors Category_filterView functionality.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         query = text("""
             SELECT DISTINCT filter_id, filter_label, filter_name
             FROM category_filters
@@ -345,7 +433,7 @@ def list_category_filters(
             ORDER BY filter_label
         """)
 
-        results = db.execute(query).fetchall()
+        results = store_db.execute(query).fetchall()
 
         filters = [
             {
@@ -361,16 +449,22 @@ def list_category_filters(
             "total": len(filters),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.post("/{category_id}/export")
 def export_category(
     category_id: int = Path(..., gt=0),
+    site_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
@@ -378,17 +472,27 @@ def export_category(
     Prepare category data for export.
     Mirrors Category_exportView functionality.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         # Get category data
         query = text("""
             SELECT cat_id, cat_name, url_name, cat_description, description, inactive,
                    template, meta_title, meta_keywords, featured, related_cats,
-                   prods_per_page, linked_to, cat_parent, rank
+                   prods_per_page, linked_to, cat_parent, `rank`
             FROM categories
             WHERE cat_id = :cat_id
         """)
 
-        result = db.execute(query, {"cat_id": category_id}).fetchone()
+        result = store_db.execute(query, {"cat_id": category_id}).fetchone()
 
         if not result:
             raise HTTPException(
@@ -405,7 +509,7 @@ def export_category(
             ORDER BY cpl.prod_order
         """)
 
-        prod_results = db.execute(prod_query, {"cat_id": category_id}).fetchall()
+        prod_results = store_db.execute(prod_query, {"cat_id": category_id}).fetchall()
 
         return {
             "category": {
@@ -434,11 +538,15 @@ def export_category(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.post("/{category_id}/import")
 def import_category(
     category_id: int = Path(..., gt=0),
+    site_id: int = Query(...),
     category_data: dict = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
@@ -447,7 +555,17 @@ def import_category(
     Import category data.
     Mirrors Category_importView functionality.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         if not category_data:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -470,29 +588,87 @@ def import_category(
                 SET {', '.join(update_fields)}
                 WHERE cat_id = :cat_id
             """)
-            db.execute(update_query, params)
+            store_db.execute(update_query, params)
 
         # Update products in category if provided
         if 'products' in category_data:
             # Clear existing products
-            db.execute(text("DELETE FROM cat_prod_link WHERE cat_id = :cat_id"), {"cat_id": category_id})
+            store_db.execute(text("DELETE FROM cat_prod_link WHERE cat_id = :cat_id"), {"cat_id": category_id})
 
             # Add new products
             for prod_id in category_data['products']:
-                db.execute(
+                store_db.execute(
                     text("INSERT INTO cat_prod_link (cat_id, prod_id) VALUES (:cat_id, :prod_id)"),
                     {"cat_id": category_id, "prod_id": prod_id}
                 )
 
-        db.commit()
+        store_db.commit()
 
         return {"message": "Category imported successfully"}
 
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        if store_db:
+            store_db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.post("/adjust-order")
+def adjust_category_order(
+    site_id: int = Query(...),
+    data: dict = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Adjust category ranks.
+    Handles bulk reordering of categories.
+    """
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
+        ranks = data.get('ranks', {}) if data else {}
+        reorder_all = data.get('reorder_all', False) if data else False
+
+        for key, value in ranks.items():
+            if key.startswith('rank_'):
+                cat_id = int(key.split('_')[1])
+                new_rank = int(value)
+
+                update_query = text("""
+                    UPDATE categories
+                    SET `rank` = :rank, date_modified = NOW()
+                    WHERE cat_id = :cat_id
+                """)
+                store_db.execute(update_query, {"rank": new_rank, "cat_id": cat_id})
+
+        store_db.commit()
+        return {"message": "Categories reordered successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+    finally:
+        if store_db:
+            store_db.close()

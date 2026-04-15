@@ -2,125 +2,142 @@
 
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { useStore } from '@/context/StoreContext';
+import { useAuth } from '@/context/AuthContext';
 
-interface Feature {
-  id: string;
+interface FeatureData {
   name: string;
+  build: string;
+  title: string;
   description: string;
-  settings: Record<string, any>;
+  date_entered: string;
+  cost: string;
+  link: string;
+  info: string;
+  noupgrade: string;
+  live: string;
+  dashboard: string;
+  type: string;
+  prereqs: string[];
 }
 
-interface FormData {
-  name: string;
-  description: string;
-  settings: Record<string, string>;
-}
-
-export default function FeatureEditPage() {
-  const router = useRouter();
+export default function StoreFeaturesEditPage() {
   const searchParams = useSearchParams();
-  const featureId = searchParams.get('id');
+  const router = useRouter();
+  const { siteId } = useStore();
+  const { user } = useAuth();
+  const featureName = searchParams.get('name') || '';
+  const isExisting = featureName !== '';
 
-  const [formData, setFormData] = useState<FormData>({
+  const [form, setForm] = useState<FeatureData>({
     name: '',
+    build: '',
+    title: '',
     description: '',
-    settings: {},
+    date_entered: '',
+    cost: '',
+    link: '',
+    info: '',
+    noupgrade: '',
+    live: '',
+    dashboard: '',
+    type: 'new_feature',
+    prereqs: [],
   });
-
-  const [feature, setFeature] = useState<Feature | null>(null);
+  const [upgrades, setUpgrades] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (featureId) {
-      fetchFeature();
-    }
-  }, [featureId]);
+    loadData();
+  }, [featureName]);
 
-  const fetchFeature = async () => {
+  const loadData = async () => {
     try {
-      const res = await api.get(`/store/features/${featureId}`);
-      const featureData = res.data.data;
-      setFeature(featureData);
-      setFormData({
-        name: featureData.name,
-        description: featureData.description,
-        settings: featureData.settings || {},
-      });
+      setLoading(true);
+
+      // Load template upgrades for prerequisites dropdown
+      try {
+        const upgRes = await api.get('/store-features/upgrades');
+        setUpgrades(upgRes.data || {});
+      } catch (e) {
+        // Non-critical
+      }
+
+      // If editing existing feature, load its data
+      if (isExisting) {
+        const res = await api.get(`/store-features/feature/${encodeURIComponent(featureName)}`);
+        setForm(res.data);
+      }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load feature');
+      setError(err.response?.data?.detail || 'Failed to load feature');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
+  const handleChange = (field: string, value: string) => {
+    setForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleNoupgradeChange = (checked: boolean) => {
+    setForm(prev => ({
       ...prev,
-      [name]: value,
+      noupgrade: checked ? 'y' : '',
+      cost: checked ? '' : prev.cost,
     }));
   };
 
-  const handleSettingChange = (key: string, value: string) => {
-    setFormData(prev => ({
-      ...prev,
-      settings: {
-        ...prev.settings,
-        [key]: value,
-      },
-    }));
+  const handlePrereqsChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selected = Array.from(e.target.selectedOptions, option => option.value);
+    setForm(prev => ({ ...prev, prereqs: selected }));
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
+    setSaving(true);
     setError(null);
 
     try {
-      await api.put(`/store/features/${featureId}`, {
-        name: formData.name,
-        description: formData.description,
-        settings: formData.settings,
+      await api.post('/store-features/edit', {
+        ...form,
+        prereqs: form.prereqs.join(','),
+        existing: isExisting ? 'y' : 'n',
       });
-      router.push('/store/features');
+      router.push('/dashboard/store/features');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to update feature');
+      setError(err.response?.data?.detail || 'Failed to save feature');
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
   if (loading) {
     return (
       <div className="row">
-        <div className="col-lg-12">
-          <p>Loading...</p>
-        </div>
+        <div className="col-lg-12"><p>Loading...</p></div>
       </div>
     );
   }
 
+  // Sort upgrades alphabetically by title
+  const sortedUpgrades = Object.entries(upgrades).sort((a, b) =>
+    a[1].localeCompare(b[1])
+  );
+
   return (
-    <div>
+    <>
       <div className="row">
         <div className="col-lg-12">
-          <h1>Edit Feature</h1>
-          <p>
-            <i className="fa fa-info-circle"></i> Modify feature settings.
-          </p>
+          <h1>Add/Edit Store Feature</h1>
         </div>
       </div>
       <br />
 
       {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
-          </div>
-        </div>
+        <div className="alert alert-danger">{error}</div>
       )}
 
       <form onSubmit={handleSubmit}>
@@ -128,59 +145,187 @@ export default function FeatureEditPage() {
           <div className="col-lg-12">
             <div className="panel panel-primary">
               <div className="panel-heading">
-                <h3 className="panel-title"><i className="fa fa-edit"></i> Feature Settings</h3>
+                <h3 className="panel-title">
+                  <i className="fa fa-cogs"></i> Feature Information
+                </h3>
               </div>
               <div className="panel-body">
                 <div className="form-group">
-                  <label>Feature Name *</label>
+                  <label>Name</label>
                   <input
                     type="text"
-                    className="form-control"
                     name="name"
-                    value={formData.name}
-                    onChange={handleInputChange}
-                    required
+                    className="form-control"
+                    value={form.name}
+                    onChange={(e) => handleChange('name', e.target.value)}
+                    disabled={isExisting}
                   />
                 </div>
-
+                <div className="form-group">
+                  <label>Build</label>
+                  <input
+                    type="text"
+                    name="build"
+                    className="form-control"
+                    value={form.build}
+                    onChange={(e) => handleChange('build', e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Title</label>
+                  <input
+                    type="text"
+                    name="title"
+                    className="form-control"
+                    value={form.title}
+                    onChange={(e) => handleChange('title', e.target.value)}
+                  />
+                </div>
                 <div className="form-group">
                   <label>Description</label>
-                  <textarea
-                    className="form-control"
+                  <input
+                    type="text"
                     name="description"
-                    value={formData.description}
-                    onChange={handleInputChange}
-                    rows={3}
+                    className="form-control"
+                    value={form.description}
+                    onChange={(e) => handleChange('description', e.target.value)}
+                    style={{ width: '100%' }}
                   />
                 </div>
-
-                {Object.entries(formData.settings).map(([key, value]) => (
-                  <div key={key} className="form-group">
-                    <label>{key}</label>
+                <div className="form-group">
+                  <label>Date</label>
+                  <input
+                    type="text"
+                    name="date_entered"
+                    className="form-control"
+                    value={form.date_entered}
+                    onChange={(e) => handleChange('date_entered', e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Cost</label>
+                  <input
+                    type="text"
+                    name="cost"
+                    className="form-control"
+                    value={form.cost}
+                    onChange={(e) => handleChange('cost', e.target.value)}
+                    disabled={form.noupgrade === 'y'}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Link</label>
+                  <input
+                    type="text"
+                    name="link"
+                    className="form-control"
+                    value={form.link}
+                    onChange={(e) => handleChange('link', e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Info</label>
+                  <textarea
+                    name="info"
+                    cols={50}
+                    rows={10}
+                    className="form-control"
+                    value={form.info}
+                    onChange={(e) => handleChange('info', e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>
                     <input
-                      type="text"
-                      className="form-control"
-                      value={value as string}
-                      onChange={(e) => handleSettingChange(key, e.target.value)}
-                    />
-                  </div>
-                ))}
+                      type="checkbox"
+                      checked={form.noupgrade === 'y'}
+                      onChange={(e) => handleNoupgradeChange(e.target.checked)}
+                    />{' '}
+                    This feature does not require an upgrade.
+                  </label>
+                </div>
+                <div className="form-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={form.live === 'y'}
+                      onChange={(e) => handleChange('live', e.target.checked ? 'y' : '')}
+                    />{' '}
+                    Show this feature description in the admin.
+                  </label>
+                </div>
+                <div className="form-group">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={form.dashboard === 'y'}
+                      onChange={(e) => handleChange('dashboard', e.target.checked ? 'y' : '')}
+                    />{' '}
+                    Show this feature in the Dashboard
+                  </label>
+                </div>
+                <div className="form-group">
+                  <label>This item is a</label>
+                  <br />
+                  <label style={{ fontWeight: 'normal', marginRight: '15px' }}>
+                    <input
+                      type="radio"
+                      name="type"
+                      value="new_feature"
+                      checked={form.type === 'new_feature' || form.type === ''}
+                      onChange={(e) => handleChange('type', e.target.value)}
+                    />{' '}
+                    New Feature
+                  </label>
+                  <br />
+                  <label style={{ fontWeight: 'normal', marginRight: '15px' }}>
+                    <input
+                      type="radio"
+                      name="type"
+                      value="improvement"
+                      checked={form.type === 'improvement'}
+                      onChange={(e) => handleChange('type', e.target.value)}
+                    />{' '}
+                    Improvement
+                  </label>
+                  <br />
+                  <label style={{ fontWeight: 'normal' }}>
+                    <input
+                      type="radio"
+                      name="type"
+                      value="fix"
+                      checked={form.type === 'fix'}
+                      onChange={(e) => handleChange('type', e.target.value)}
+                    />{' '}
+                    Fix
+                  </label>
+                </div>
+                <div className="form-group">
+                  <label>Prerequisites</label>
+                  <select
+                    name="prereqs"
+                    multiple
+                    size={10}
+                    className="form-control"
+                    value={form.prereqs}
+                    onChange={handlePrereqsChange}
+                  >
+                    {sortedUpgrades.map(([name, title]) => (
+                      <option key={name} value={name}>
+                        {title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={submitting}
-            >
-              {submitting ? 'Saving...' : 'Save Changes'}
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? 'Saving...' : 'Submit'}
             </button>
-            <a href="/store/features" className="btn btn-default">
-              Cancel
-            </a>
           </div>
         </div>
       </form>
-    </div>
+    </>
   );
 }

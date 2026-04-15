@@ -13,6 +13,7 @@ from app.routers import (
     stores,
     settings as settings_router,
     templates_mgmt,
+    templates,
     marketing,
     shipping,
     wholesale,
@@ -20,6 +21,10 @@ from app.routers import (
     mainpage,
     admin_tools,
     tax,
+    store_features,
+    store_changelog,
+    store_settings,
+    store_domain,
 )
 
 app = FastAPI(
@@ -47,6 +52,7 @@ app.include_router(reports.router, prefix=settings.API_PREFIX)
 app.include_router(stores.router, prefix=settings.API_PREFIX)
 app.include_router(settings_router.router, prefix=settings.API_PREFIX)
 app.include_router(templates_mgmt.router, prefix=settings.API_PREFIX)
+app.include_router(templates.router, prefix=settings.API_PREFIX)
 app.include_router(marketing.router, prefix=settings.API_PREFIX)
 app.include_router(shipping.router, prefix=settings.API_PREFIX)
 app.include_router(wholesale.router, prefix=settings.API_PREFIX)
@@ -54,6 +60,10 @@ app.include_router(master_list.router, prefix=settings.API_PREFIX)
 app.include_router(mainpage.router, prefix=settings.API_PREFIX)
 app.include_router(admin_tools.router, prefix=settings.API_PREFIX)
 app.include_router(tax.router, prefix=settings.API_PREFIX)
+app.include_router(store_features.router, prefix=settings.API_PREFIX)
+app.include_router(store_changelog.router, prefix=settings.API_PREFIX)
+app.include_router(store_settings.router, prefix=settings.API_PREFIX)
+app.include_router(store_domain.router, prefix=settings.API_PREFIX)
 
 
 @app.get("/")

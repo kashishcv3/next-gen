@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional, List
-from app.database import get_db
+from app.database import get_db, get_store_db_name, get_store_session
 from app.models.user import User
 from app.dependencies import get_current_user, get_current_admin_user
 from datetime import datetime
@@ -71,6 +71,7 @@ class CategoryProduct(BaseModel):
 
 @router.get("/list", response_model=dict)
 def list_products_by_category(
+    site_id: int = Query(..., description="Store ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     category_ids: Optional[str] = Query(None, description="Comma-separated category IDs to expand"),
@@ -79,7 +80,17 @@ def list_products_by_category(
     List products organized by category.
     Mirrors Product_listView functionality.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         prod_list = {}
         if category_ids:
             prod_list = {cid.strip(): '1' for cid in category_ids.split(',') if cid.strip()}
@@ -102,15 +113,15 @@ def list_products_by_category(
             ORDER BY c.cat_id, c.prod_order, p.prod_id
         """)
 
-        results = db.execute(query).fetchall()
+        results = store_db.execute(query).fetchall()
 
         # Get categories
         cat_query = text("""
-            SELECT cat_id, cat_name, rank, inactive
+            SELECT cat_id, cat_name, `rank`, inactive
             FROM categories
-            ORDER BY cat_parent, rank, cat_name
+            ORDER BY cat_parent, `rank`, cat_name
         """)
-        cat_results = db.execute(cat_query).fetchall()
+        cat_results = store_db.execute(cat_query).fetchall()
 
         # Get product counts
         count_query = text("""
@@ -121,7 +132,7 @@ def list_products_by_category(
             AND (p.parent = 0 OR p.parent IS NULL)
             GROUP BY cpl.cat_id
         """)
-        count_results = db.execute(count_query).fetchall()
+        count_results = store_db.execute(count_query).fetchall()
         counts = {r.cat_id: r.prod_count for r in count_results}
 
         # Build category structure
@@ -162,15 +173,21 @@ def list_products_by_category(
             "total": len(results),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.get("/by-name", response_model=dict)
 def list_products_by_name(
+    site_id: int = Query(..., description="Store ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     sort: Optional[str] = Query("prod_name", description="Sort field"),
@@ -181,7 +198,17 @@ def list_products_by_name(
     List all products alphabetically or by search criteria.
     Mirrors Product_by_nameView functionality.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         query = text("""
             SELECT prod_id, sku, prod_name, is_parent, inactive, has_attributes
             FROM products
@@ -199,7 +226,7 @@ def list_products_by_name(
                 AND (parent = '' OR parent IS NULL OR parent = 0)
                 AND (prod_name LIKE :search OR sku LIKE :search OR ext_id LIKE :search)
                 ORDER BY """ + sort)
-            results = db.execute(query, {"search": search_pattern}).fetchall()
+            results = store_db.execute(query, {"search": search_pattern}).fetchall()
         elif search_type == 'type' and search_term:
             if search_term == 'featured':
                 query = text("""
@@ -240,7 +267,7 @@ def list_products_by_name(
                     AND (parent = '' OR parent IS NULL OR parent = 0)
                     AND inactive = 'y'
                     ORDER BY """ + sort)
-            results = db.execute(query).fetchall()
+            results = store_db.execute(query).fetchall()
         else:
             query = text(f"""
                 SELECT prod_id, sku, prod_name, is_parent, inactive, has_attributes
@@ -249,7 +276,7 @@ def list_products_by_name(
                 AND (parent = '' OR parent IS NULL OR parent = 0)
                 ORDER BY {sort}
             """)
-            results = db.execute(query).fetchall()
+            results = store_db.execute(query).fetchall()
 
         products = [
             {
@@ -271,15 +298,21 @@ def list_products_by_name(
             "search_term": search_term,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.get("/search", response_model=dict)
 def search_products(
+    site_id: int = Query(..., description="Store ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     q: str = Query("", min_length=0),
@@ -289,9 +322,19 @@ def search_products(
     Search products by name, SKU, or external ID.
     Mirrors Product_searchView functionality.
     """
+    store_db = None
     try:
         if not q:
             return {"results": [], "total": 0, "query": q}
+
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
 
         search_pattern = f"%{q}%"
         query = text("""
@@ -303,7 +346,7 @@ def search_products(
             LIMIT :limit
         """)
 
-        results = db.execute(query, {"search": search_pattern, "limit": limit}).fetchall()
+        results = store_db.execute(query, {"search": search_pattern, "limit": limit}).fetchall()
 
         products = [
             {
@@ -324,23 +367,39 @@ def search_products(
             "query": q,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.get("/{product_id}", response_model=ProductDetail)
 def get_product(
     product_id: int = Path(..., gt=0),
+    site_id: int = Query(..., description="Store ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
     Get detailed product information.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         query = text("""
             SELECT prod_id, prod_name, sku, description, is_parent, parent, inactive,
                    has_attributes, special_start, special_stop, free_special, ext_id,
@@ -349,7 +408,7 @@ def get_product(
             WHERE prod_id = :prod_id
         """)
 
-        result = db.execute(query, {"prod_id": product_id}).fetchone()
+        result = store_db.execute(query, {"prod_id": product_id}).fetchone()
 
         if not result:
             raise HTTPException(
@@ -399,18 +458,32 @@ def get_product(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 def create_product(
     product: dict,
+    site_id: int = Query(..., description="Store ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
     """
     Create a new product.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         # Insert product
         insert_query = text("""
             INSERT INTO products (prod_name, sku, description, is_parent, parent,
@@ -423,22 +496,29 @@ def create_product(
                    NOW(), NOW())
         """)
 
-        db.execute(insert_query, product)
-        db.commit()
+        store_db.execute(insert_query, product)
+        store_db.commit()
 
         return {"message": "Product created successfully"}
 
+    except HTTPException:
+        raise
     except Exception as e:
-        db.rollback()
+        if store_db:
+            store_db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.put("/{product_id}")
 def update_product(
     product_id: int = Path(..., gt=0),
+    site_id: int = Query(..., description="Store ID"),
     product: dict = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
@@ -446,10 +526,20 @@ def update_product(
     """
     Update an existing product.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         # Check if product exists
         check_query = text("SELECT prod_id FROM products WHERE prod_id = :prod_id")
-        if not db.execute(check_query, {"prod_id": product_id}).fetchone():
+        if not store_db.execute(check_query, {"prod_id": product_id}).fetchone():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Product not found"
@@ -473,31 +563,249 @@ def update_product(
             WHERE prod_id = :prod_id
         """)
 
-        db.execute(update_query, params)
-        db.commit()
+        store_db.execute(update_query, params)
+        store_db.commit()
 
         return {"message": "Product updated successfully"}
 
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        if store_db:
+            store_db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.get("/{product_id}/edit", response_model=dict)
+def get_product_for_edit(
+    product_id: int = Path(..., gt=0),
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get detailed product information for editing.
+    """
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
+        query = text("""
+            SELECT prod_id, prod_name, sku, ext_id, url_name, prod_description,
+                   stock_status, backordered_date, inactive, retail, wholesale,
+                   shipping_weight, unit, keywords, meta_keywords, meta_title,
+                   meta_description, template, desc_header, brand, manufacturer,
+                   is_parent, has_attributes, date_added, date_modified
+            FROM products
+            WHERE prod_id = :prod_id
+        """)
+
+        result = store_db.execute(query, {"prod_id": product_id}).fetchone()
+
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+
+        return {
+            "prod_id": result.prod_id,
+            "prod_name": result.prod_name,
+            "sku": result.sku,
+            "ext_id": result.ext_id,
+            "url_name": result.url_name,
+            "prod_description": result.prod_description,
+            "stock_status": result.stock_status,
+            "backordered_date": result.backordered_date,
+            "inactive": result.inactive,
+            "retail": result.retail,
+            "wholesale": result.wholesale,
+            "shipping_weight": result.shipping_weight,
+            "unit": result.unit,
+            "keywords": result.keywords,
+            "meta_keywords": result.meta_keywords,
+            "meta_title": result.meta_title,
+            "meta_description": result.meta_description,
+            "template": result.template,
+            "desc_header": result.desc_header,
+            "brand": result.brand,
+            "manufacturer": result.manufacturer,
+            "is_parent": result.is_parent,
+            "has_attributes": result.has_attributes,
+            "date_created": result.date_added.strftime("%m/%d/%Y %H:%M:%S") if result.date_added else None,
+            "last_modified": result.date_modified.strftime("%m/%d/%Y %H:%M:%S") if result.date_modified else None,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.post("/adjust-order")
+def adjust_product_order(
+    site_id: int = Query(..., description="Store ID"),
+    data: dict = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Adjust product order or weights in categories.
+    """
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
+        if not data:
+            data = {}
+
+        for key, value in data.items():
+            if key.startswith('adj_'):
+                # Adjust order: adj_cat_id_prod_id_current_rank
+                parts = key.split('_')
+                if len(parts) >= 4:
+                    cat_id = int(parts[1])
+                    prod_id = int(parts[2])
+                    new_rank = int(value)
+
+                    update_query = text("""
+                        UPDATE cat_prod_link
+                        SET prod_order = :rank
+                        WHERE cat_id = :cat_id AND prod_id = :prod_id
+                    """)
+                    store_db.execute(update_query, {"rank": new_rank, "cat_id": cat_id, "prod_id": prod_id})
+
+            elif key.startswith('weight_'):
+                # Adjust weight: weight_cat_id_prod_id_current_weight
+                parts = key.split('_')
+                if len(parts) >= 4:
+                    cat_id = int(parts[1])
+                    prod_id = int(parts[2])
+                    new_weight = float(value)
+
+                    update_query = text("""
+                        UPDATE cat_prod_link
+                        SET weight = :weight
+                        WHERE cat_id = :cat_id AND prod_id = :prod_id
+                    """)
+                    store_db.execute(update_query, {"weight": new_weight, "cat_id": cat_id, "prod_id": prod_id})
+
+        store_db.commit()
+        return {"message": "Product order updated successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.get("/options")
+def get_product_options(
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get product form options (stock status, units, templates, etc.)
+    """
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
+        stock_status_query = text("""
+            SELECT DISTINCT stock_status FROM products WHERE stock_status IS NOT NULL
+        """)
+        stock_statuses = store_db.execute(stock_status_query).fetchall()
+
+        units_query = text("""
+            SELECT DISTINCT unit FROM products WHERE unit IS NOT NULL
+        """)
+        units = store_db.execute(units_query).fetchall()
+
+        return {
+            "stock_status": {s.stock_status: s.stock_status for s in stock_statuses},
+            "units": {u.unit: u.unit for u in units},
+            "templates": {
+                "default": "Default Template",
+                "minimal": "Minimal Template",
+                "gallery": "Gallery Template",
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.delete("/{product_id}")
 def delete_product(
     product_id: int = Path(..., gt=0),
+    site_id: int = Query(..., description="Store ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
     """
     Delete (mark as deleted) a product.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         # Mark as deleted (soft delete)
         update_query = text("""
             UPDATE products
@@ -505,7 +813,7 @@ def delete_product(
             WHERE prod_id = :prod_id
         """)
 
-        result = db.execute(update_query, {"prod_id": product_id})
+        result = store_db.execute(update_query, {"prod_id": product_id})
 
         if result.rowcount == 0:
             raise HTTPException(
@@ -513,23 +821,28 @@ def delete_product(
                 detail="Product not found"
             )
 
-        db.commit()
+        store_db.commit()
 
         return {"message": "Product deleted successfully"}
 
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        if store_db:
+            store_db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.post("/{product_id}/copy")
 def copy_product(
     product_id: int = Path(..., gt=0),
+    site_id: int = Query(..., description="Store ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
@@ -537,13 +850,23 @@ def copy_product(
     Copy an existing product.
     Mirrors Product_copyView functionality.
     """
+    store_db = None
     try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_db = get_store_session(store_db_name)
+
         # Get original product
         query = text("""
             SELECT * FROM products WHERE prod_id = :prod_id
         """)
 
-        result = db.execute(query, {"prod_id": product_id}).fetchone()
+        result = store_db.execute(query, {"prod_id": product_id}).fetchone()
 
         if not result:
             raise HTTPException(
@@ -565,16 +888,20 @@ def copy_product(
             WHERE prod_id = :prod_id
         """)
 
-        db.execute(insert_query, {"prod_id": product_id})
-        db.commit()
+        store_db.execute(insert_query, {"prod_id": product_id})
+        store_db.commit()
 
         return {"message": "Product copied successfully"}
 
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
+        if store_db:
+            store_db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()

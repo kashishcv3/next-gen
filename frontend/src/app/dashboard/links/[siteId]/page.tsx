@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import api from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { useStore } from '@/context/StoreContext';
 
 interface CompanyInfo {
   site_id: number;
@@ -21,26 +22,57 @@ interface CompanyInfo {
   uid?: number;
 }
 
+interface PeriodStats {
+  visitors: string;
+  orders: string;
+  total: string;
+  revenue: string;
+  shipping: string;
+  avg: string;
+}
+
 interface Stats {
-  total_products: number;
-  total_customers: number;
-  total_orders: number;
-  revenue: number;
+  status: string;
+  orders: number;
+  revenue: string;
+  ws_orders: number;
+  catalogs: number;
+  product_reviews: number;
+  active: number;
+  inactive: number;
+  today: PeriodStats;
+  yesterday: PeriodStats;
+  month?: PeriodStats;
+  year?: PeriodStats;
+  last_month?: PeriodStats;
+  last_year?: PeriodStats;
+}
+
+interface Feature {
+  title: string;
+  description: string;
 }
 
 interface LinksData {
   company_info: CompanyInfo;
+  exp_date: string;
   stats: Stats;
+  new_features: Feature[];
 }
 
 export default function LinksPage() {
   const params = useParams();
   const siteId = params.siteId as string;
   const { user: currentUser } = useAuth();
+  const { setStore } = useStore();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<LinksData | null>(null);
+  const [showFeatures, setShowFeatures] = useState(false);
+  const [showMoreStats, setShowMoreStats] = useState(false);
+  const [moreStatsLoading, setMoreStatsLoading] = useState(false);
+  const [extendedStats, setExtendedStats] = useState<Stats | null>(null);
 
   useEffect(() => {
     fetchLinksData();
@@ -52,6 +84,11 @@ export default function LinksPage() {
       setError(null);
       const response = await api.get(`/mainpage/links/${siteId}`);
       setData(response.data);
+      // Populate store context so all other pages get the correct site_id
+      if (response.data?.company_info) {
+        const ci = response.data.company_info;
+        setStore(ci.site_id, ci.name, ci.display_name, ci.is_live);
+      }
     } catch (err: any) {
       console.error('Error fetching links:', err);
       setError(err.response?.data?.detail || 'Failed to load store data');
@@ -60,10 +97,33 @@ export default function LinksPage() {
     }
   };
 
+  const fetchMoreStats = async () => {
+    try {
+      setMoreStatsLoading(true);
+      const response = await api.get(`/mainpage/links/${siteId}`, {
+        params: { all: true },
+      });
+      setExtendedStats(response.data.stats);
+      setShowMoreStats(true);
+    } catch (err: any) {
+      console.error('Error fetching extended stats:', err);
+    } finally {
+      setMoreStatsLoading(false);
+    }
+  };
+
+  const handleMoreStats = () => {
+    if (extendedStats) {
+      setShowMoreStats(true);
+    } else {
+      fetchMoreStats();
+    }
+  };
+
   if (loading) {
     return (
       <div className="container-fluid" style={{ padding: '20px' }}>
-        <div className="alert alert-info">Loading...</div>
+        <div className="alert alert-info"><i className="fa fa-spinner fa-spin"></i> Loading...</div>
       </div>
     );
   }
@@ -84,156 +144,293 @@ export default function LinksPage() {
     );
   }
 
-  const company = data.company_info;
-  const isLive = company.is_live === 'y';
+  const { company_info: company, stats, new_features, exp_date } = data;
+  const hasReportPerms = true; // TODO: check permissions
+
+  // Render a stats row
+  const renderStatsRow = (label: string, period: PeriodStats | undefined) => {
+    if (!period) return null;
+    return (
+      <tr>
+        <td>{label}</td>
+        <td className="text-center">{period.visitors}</td>
+        <td className="text-center">{period.orders}</td>
+        <td className="text-center">{period.total}</td>
+        <td className="text-center">{period.revenue}</td>
+        <td className="text-center">{period.shipping}</td>
+        <td className="text-center">{period.avg}</td>
+      </tr>
+    );
+  };
 
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
-      <h1 style={{ marginBottom: '10px' }}>{company.name}</h1>
-      <p style={{ marginBottom: '30px', color: '#666' }}>
-        {company.display_name}
-      </p>
+      {/* Dashboard Title */}
+      <div className="row">
+        <div className="col-lg-12">
+          <h1>Dashboard</h1>
+          <p>
+            <i className="fa fa-info-circle"></i> The Dashboard screen is a summary of some of the key pieces of information regarding your store.
+            This is also where we will announce new features and tools as they are added.
+          </p>
+          {exp_date && (
+            <p><span className="label label-warning">Notice</span> This store is currently inactive and will be deleted {exp_date} if it remains inactive. To keep the store active, simply save a change to a product, category or template - the status change will be reflected the following day.</p>
+          )}
+          <p><span className="label label-danger">Warning</span> Using the admin in multiple tabs or windows of the same browser may result in site errors.</p>
+          <br />
+        </div>
+      </div>
 
-      {/* Store Status Section */}
-      <div className="well" style={{ marginBottom: '30px' }}>
-        <h3 style={{ marginTop: 0 }}>Store Status</h3>
+      {/* New Feature Releases */}
+      {new_features.length > 0 && (
+        <>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setShowFeatures(!showFeatures)}
+          >
+            View New Feature Releases&nbsp;&nbsp;
+            <span className="badge">{new_features.length}</span>
+          </button>
+          {showFeatures && (
+            <div className="row" style={{ marginTop: '10px' }}>
+              <div className="col-lg-12">
+                <br />
+                <div className="well well-cv3-table">
+                  <div className="table-responsive">
+                    <table className="table table-hover table-striped tablesorter cv3-data-table">
+                      <thead>
+                        <tr>
+                          <th>New Feature Releases</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {new_features.map((feature, idx) => (
+                          <tr key={idx}>
+                            <td>
+                              <Link href={`/dashboard/store/features`}>
+                                {feature.title}
+                              </Link> - {feature.description}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Store Maintenance Table */}
+      <div className="row">
+        <div className="col-lg-12">
+          <br />
+          <div className="well well-cv3-table">
+            <div className="table-responsive">
+              <table className="table table-hover table-striped tablesorter cv3-data-table">
+                <thead>
+                  <tr>
+                    <th colSpan={2}>Store Maintenance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Live Site Status</td>
+                    <td className="text-right">
+                      {stats.status.includes('template(s)') ? (
+                        <Link href={`/dashboard/templates/list`}>{stats.status}</Link>
+                      ) : (
+                        stats.status
+                      )}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Pending Orders</td>
+                    <td className="text-right">
+                      <Link href={`/dashboard/orders/pending`}>{stats.orders} order(s)</Link>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Pending Wholesale Orders</td>
+                    <td className="text-right">
+                      <Link href={`/dashboard/wholesale/orders`}>{stats.ws_orders} order(s)</Link>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Catalog Requests</td>
+                    <td className="text-right">
+                      <Link href={`/dashboard/orders/catalog-export`}>{stats.catalogs} request(s)</Link>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Pending Product Reviews</td>
+                    <td className="text-right">
+                      <Link href={`/dashboard/products/reviews`}>{stats.product_reviews} review(s)</Link>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Products</td>
+                    <td className="text-right">
+                      <Link href={`/dashboard/products/list`}>{stats.active} active, {stats.inactive} inactive</Link>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Stats Table */}
+      {hasReportPerms && (
         <div className="row">
-          <div className="col-sm-6">
-            <p>
-              <strong>Status:</strong>{' '}
-              <span className={`label ${isLive ? 'label-success' : 'label-default'}`}>
-                {isLive ? 'Live' : 'Development'}
-              </span>
-            </p>
-            <p>
-              <strong>Primary Domain:</strong>{' '}
-              {company.domain ? (
-                <a href={`https://${company.domain}`} target="_blank" rel="noopener noreferrer">
-                  {company.domain}
-                </a>
+          <div className="col-lg-12">
+            <br />
+            <div className="well well-cv3-table">
+              <div className="table-responsive">
+                <table className="table table-hover table-striped tablesorter cv3-data-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: '25%' }}>Quick Stats</th>
+                      <th className="text-center">Visitors</th>
+                      <th className="text-center">Orders</th>
+                      <th className="text-center">Total Revenue</th>
+                      <th className="text-center">Prods/Services</th>
+                      <th className="text-center">Shipping/Tax</th>
+                      <th className="text-center">Avg. Order</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td>Today</td>
+                      <td className="text-center">{stats.today.visitors}</td>
+                      <td className="text-center">{stats.today.orders}</td>
+                      <td className="text-center">{stats.today.total}</td>
+                      <td className="text-center">{stats.today.revenue}</td>
+                      <td className="text-center">{stats.today.shipping}</td>
+                      <td className="text-center">{stats.today.avg}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={7}>&nbsp;</td>
+                    </tr>
+                    <tr>
+                      <td>Yesterday</td>
+                      <td className="text-center">{stats.yesterday.visitors}</td>
+                      <td className="text-center">{stats.yesterday.orders}</td>
+                      <td className="text-center">{stats.yesterday.total}</td>
+                      <td className="text-center">{stats.yesterday.revenue}</td>
+                      <td className="text-center">{stats.yesterday.shipping}</td>
+                      <td className="text-center">{stats.yesterday.avg}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            {/* More Stats & More Reporting buttons — matches old platform exactly */}
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={handleMoreStats}
+              disabled={moreStatsLoading}
+              style={{ marginRight: '5px' }}
+            >
+              {moreStatsLoading ? (
+                <><i className="fa fa-spinner fa-spin"></i> Loading...</>
               ) : (
-                'Not configured'
+                'More Stats'
               )}
-            </p>
-            <p>
-              <strong>Secure Domain:</strong>{' '}
-              {company.secure_domain ? (
-                <a href={`https://${company.secure_domain}`} target="_blank" rel="noopener noreferrer">
-                  {company.secure_domain}
-                </a>
-              ) : (
-                'Not configured'
-              )}
-            </p>
-          </div>
-          <div className="col-sm-6">
-            <p>
-              <strong>Created:</strong> {company.date_created}
-            </p>
-            <p>
-              <strong>Cloud Hosting:</strong> {company.in_cloud === 'y' ? 'Yes' : 'No'}
-            </p>
-            {company.admin_host && (
-              <p>
-                <strong>Admin Host:</strong> {company.admin_host}
-              </p>
-            )}
+            </button>
+            <Link href={`/dashboard/reports/overview`} className="btn btn-primary btn-sm">
+              More Reporting
+            </Link>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Quick Stats Section */}
-      <div className="panel panel-default" style={{ marginBottom: '30px' }}>
-        <div className="panel-heading">
-          <h3 className="panel-title">Quick Stats</h3>
-        </div>
-        <div className="panel-body">
-          <div className="row">
-            <div className="col-sm-3">
-              <div className="text-center">
-                <h4 style={{ marginTop: 0 }}>{data.stats.total_products}</h4>
-                <p>Products</p>
+      {/* More Stats Modal — replaces old platform popup window */}
+      {showMoreStats && extendedStats && (
+        <div
+          className="modal fade in"
+          style={{
+            display: 'block',
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            zIndex: 9999,
+            overflow: 'auto',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowMoreStats(false);
+          }}
+        >
+          <div
+            className="modal-dialog"
+            style={{
+              maxWidth: '900px',
+              margin: '50px auto',
+            }}
+          >
+            <div className="modal-content">
+              <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h4 className="modal-title">More Stats</h4>
+                <button
+                  type="button"
+                  className="close"
+                  onClick={() => setShowMoreStats(false)}
+                  style={{ border: 'none', background: 'none', fontSize: '24px', cursor: 'pointer' }}
+                >
+                  &times;
+                </button>
               </div>
-            </div>
-            <div className="col-sm-3">
-              <div className="text-center">
-                <h4 style={{ marginTop: 0 }}>{data.stats.total_customers}</h4>
-                <p>Customers</p>
+              <div className="modal-body">
+                <div className="well well-cv3-table">
+                  <div className="table-responsive">
+                    <table className="table table-hover table-striped tablesorter cv3-data-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '25%' }}>Quick Stats</th>
+                          <th className="text-center">Visitors</th>
+                          <th className="text-center">Orders</th>
+                          <th className="text-center">Total Revenue</th>
+                          <th className="text-center">Prods/Services</th>
+                          <th className="text-center">Shipping/Tax</th>
+                          <th className="text-center">Avg. Order</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {renderStatsRow('Today', extendedStats.today)}
+                        {renderStatsRow('Month-to-Date', extendedStats.month)}
+                        {renderStatsRow('Year-to-Date', extendedStats.year)}
+                        <tr>
+                          <td colSpan={7}>&nbsp;</td>
+                        </tr>
+                        {renderStatsRow('Yesterday', extendedStats.yesterday)}
+                        {renderStatsRow('Last Month', extendedStats.last_month)}
+                        {renderStatsRow('Last Year', extendedStats.last_year)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="col-sm-3">
-              <div className="text-center">
-                <h4 style={{ marginTop: 0 }}>{data.stats.total_orders}</h4>
-                <p>Orders</p>
-              </div>
-            </div>
-            <div className="col-sm-3">
-              <div className="text-center">
-                <h4 style={{ marginTop: 0 }}>${data.stats.revenue}</h4>
-                <p>Revenue</p>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-default"
+                  onClick={() => setShowMoreStats(false)}
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Store Management Links */}
-      <div className="panel panel-default">
-        <div className="panel-heading">
-          <h3 className="panel-title">Store Management</h3>
-        </div>
-        <div className="panel-body">
-          <div className="row">
-            <div className="col-sm-6">
-              <ul className="list-unstyled">
-                <li style={{ marginBottom: '12px' }}>
-                  <Link href={`/dashboard/products/list`} className="btn btn-default btn-sm">
-                    <span className="glyphicon glyphicon-th-list"></span> Products
-                  </Link>
-                </li>
-                <li style={{ marginBottom: '12px' }}>
-                  <Link href={`/dashboard/customers/members`} className="btn btn-default btn-sm">
-                    <span className="glyphicon glyphicon-user"></span> Customers
-                  </Link>
-                </li>
-                <li style={{ marginBottom: '12px' }}>
-                  <Link href={`/dashboard/settings/general`} className="btn btn-default btn-sm">
-                    <span className="glyphicon glyphicon-cog"></span> Settings
-                  </Link>
-                </li>
-              </ul>
-            </div>
-            <div className="col-sm-6">
-              <ul className="list-unstyled">
-                <li style={{ marginBottom: '12px' }}>
-                  <Link href={`/dashboard/orders`} className="btn btn-default btn-sm">
-                    <span className="glyphicon glyphicon-shopping-cart"></span> Orders
-                  </Link>
-                </li>
-                <li style={{ marginBottom: '12px' }}>
-                  <Link href={`/dashboard/reports`} className="btn btn-default btn-sm">
-                    <span className="glyphicon glyphicon-bar-chart"></span> Reports
-                  </Link>
-                </li>
-                <li style={{ marginBottom: '12px' }}>
-                  <a href={company.domain ? `https://${company.domain}` : '#'} target="_blank" rel="noopener noreferrer" className="btn btn-default btn-sm">
-                    <span className="glyphicon glyphicon-share-alt"></span> View Store
-                  </a>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Back to Developer */}
-      <div style={{ marginTop: '30px' }}>
-        {company.uid && (
-          <Link href={`/dashboard/mainpage/${company.uid}`} className="btn btn-secondary">
-            Back to Developer
-          </Link>
-        )}
-      </div>
+      )}
     </div>
   );
 }

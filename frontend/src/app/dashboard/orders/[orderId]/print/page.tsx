@@ -49,7 +49,7 @@ export default function OrderPrintPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const orderId = params.orderId as string;
-  const siteId = searchParams.get('site_id') || '1';
+  // site_id is auto-injected by the API interceptor from StoreContext
 
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,10 +64,7 @@ export default function OrderPrintPage() {
   const fetchOrderDetail = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      params.append('site_id', siteId);
-
-      const response = await api.get<OrderDetail>(`/orders/${orderId}?${params.toString()}`);
+      const response = await api.get<OrderDetail>(`/orders/${orderId}`);
       setOrder(response.data);
       setError(null);
     } catch (err) {

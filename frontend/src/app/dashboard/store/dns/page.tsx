@@ -2,12 +2,13 @@
 
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
+import { useStore } from '@/context/StoreContext';
 
 export default function StoreDNSPage() {
+  const { siteId } = useStore();
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [siteId, setSiteId] = useState('1');
 
   useEffect(() => {
     fetchDNSRecords();

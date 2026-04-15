@@ -2,196 +2,152 @@
 
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
-import Link from 'next/link';
 
-interface Overview {
-  total_orders: number;
-  total_revenue: number;
-  total_customers: number;
-  average_order_value: number;
-  period: string;
+interface BenchmarkRow {
+  report: string;
+  prepend?: string;
+  average: string;
+  append?: string;
+  store: string;
+  better: number;
 }
 
-export default function ReportsOverviewPage() {
-  const [overview, setOverview] = useState<Overview | null>(null);
+interface BenchmarkResult {
+  data: BenchmarkRow[];
+}
+
+const timePeriodOptions: Record<string, string> = {
+  'month_to_date': 'Month to Date',
+  'year_to_date': 'Year to Date',
+  'last_month': 'Last Month',
+  'last_year': 'Last Year',
+  'this_month_last_year': 'This Month Last Year',
+};
+
+export default function BenchmarkReportPage() {
+  const [result, setResult] = useState<BenchmarkRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [period, setPeriod] = useState('month');
+  const [timePeriod, setTimePeriod] = useState<string>('month_to_date');
 
   useEffect(() => {
-    fetchOverview();
-  }, [period]);
+    fetchBenchmarkData();
+  }, [timePeriod]);
 
-  const fetchOverview = async () => {
+  const fetchBenchmarkData = async () => {
     try {
       setLoading(true);
-      const response = await api.get(`/reports/overview?period=${period}`);
-      setOverview(response.data);
       setError(null);
+      const response = await api.get(`/reports/benchmark?time_period=${timePeriod}`);
+      setResult(response.data.result || []);
     } catch (err) {
-      console.error('Failed to fetch reports:', err);
-      setError('Failed to load reports');
+      console.error('Failed to fetch benchmark report:', err);
+      setError('Failed to load benchmark report');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    fetchBenchmarkData();
+  };
+
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
-      <h1>Reports & Analytics</h1>
-
-      {/* Period Selection */}
-      <div className="panel panel-default" style={{ marginBottom: '20px' }}>
-        <div className="panel-heading">
-          <h3 className="panel-title">Select Period</h3>
-        </div>
-        <div className="panel-body">
-          <div className="btn-group" role="group">
-            <button
-              className={`btn ${period === 'day' ? 'btn-primary' : 'btn-default'}`}
-              onClick={() => setPeriod('day')}
-            >
-              Daily
-            </button>
-            <button
-              className={`btn ${period === 'week' ? 'btn-primary' : 'btn-default'}`}
-              onClick={() => setPeriod('week')}
-            >
-              Weekly
-            </button>
-            <button
-              className={`btn ${period === 'month' ? 'btn-primary' : 'btn-default'}`}
-              onClick={() => setPeriod('month')}
-            >
-              Monthly
-            </button>
-            <button
-              className={`btn ${period === 'year' ? 'btn-primary' : 'btn-default'}`}
-              onClick={() => setPeriod('year')}
-            >
-              Yearly
-            </button>
-          </div>
+      <div className="row">
+        <div className="col-lg-12">
+          <h1>Benchmark Report</h1>
+          <p>
+            <i className="fa fa-info-circle"></i> Use this report to find out how your store compares to other stores using CommerceV3.
+          </p>
+          <p>
+            <span className="label label-warning">Note</span> Please note that this report runs nightly and data from today may not be available until the following day.
+          </p>
         </div>
       </div>
+      <br />
+
+      <form onSubmit={handleSubmit}>
+        <div>
+          Time Period:
+          {' '}
+          <select
+            name="time_period"
+            className="form-control form-control-inline"
+            value={timePeriod}
+            onChange={(e) => setTimePeriod(e.target.value)}
+          >
+            {Object.entries(timePeriodOptions).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+          {' '}
+          <input type="submit" value="Submit" className="btn btn-primary" />
+          <br />
+          <br />
+        </div>
+      </form>
 
       {error && <div className="alert alert-danger">{error}</div>}
-      {loading && <div className="alert alert-info">Loading reports...</div>}
+      {loading && <div className="alert alert-info">Loading benchmark report...</div>}
 
-      {!loading && overview && (
-        <>
-          {/* Overview Stats */}
-          <div className="row" style={{ marginBottom: '20px' }}>
-            <div className="col-md-3">
-              <div className="panel panel-default">
-                <div className="panel-heading">
-                  <h4 style={{ margin: 0 }}>
-                    <i className="fa fa-shopping-cart"></i> Total Orders
-                  </h4>
-                </div>
-                <div className="panel-body">
-                  <h2>{overview.total_orders}</h2>
-                </div>
-              </div>
-            </div>
-            <div className="col-md-3">
-              <div className="panel panel-default">
-                <div className="panel-heading">
-                  <h4 style={{ margin: 0 }}>
-                    <i className="fa fa-dollar"></i> Total Revenue
-                  </h4>
-                </div>
-                <div className="panel-body">
-                  <h2>${overview.total_revenue.toFixed(2)}</h2>
-                </div>
-              </div>
-            </div>
-            <div className="col-md-3">
-              <div className="panel panel-default">
-                <div className="panel-heading">
-                  <h4 style={{ margin: 0 }}>
-                    <i className="fa fa-users"></i> Total Customers
-                  </h4>
-                </div>
-                <div className="panel-body">
-                  <h2>{overview.total_customers}</h2>
-                </div>
-              </div>
-            </div>
-            <div className="col-md-3">
-              <div className="panel panel-default">
-                <div className="panel-heading">
-                  <h4 style={{ margin: 0 }}>
-                    <i className="fa fa-chart-bar"></i> Avg Order Value
-                  </h4>
-                </div>
-                <div className="panel-body">
-                  <h2>${overview.average_order_value.toFixed(2)}</h2>
-                </div>
+      {!loading && result.length > 0 && (
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="well well-cv3-table">
+              <div className="table-responsive">
+                <table className="table table-hover table-striped">
+                  <thead>
+                    <tr>
+                      <th>Report</th>
+                      <th className="text-center">CV3 Average</th>
+                      <th className="text-center">Your Store</th>
+                      <th className="text-center">
+                        Percentile
+                        <br />
+                        (100% is top of your class)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.map((row, index) => {
+                      // Skip Sales Trend and Visitor Trend
+                      if (row.report === 'Sales Trend' || row.report === 'Visitor Trend') {
+                        return null;
+                      }
+                      return (
+                        <tr key={index}>
+                          <td>{row.report}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            {row.prepend}
+                            {row.average}
+                            {row.append}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {row.prepend}
+                            {row.store}
+                            {row.append}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>{row.better}%</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Available Reports */}
-          <div className="panel panel-default">
-            <div className="panel-heading">
-              <h3 className="panel-title">Available Reports</h3>
-            </div>
-            <div className="panel-body">
-              <div className="row">
-                <div className="col-md-4" style={{ marginBottom: '20px' }}>
-                  <Link href="/dashboard/reports/salesrank" className="btn btn-block btn-default">
-                    <i className="fa fa-bar-chart"></i><br />
-                    Sales Rank
-                  </Link>
-                  <p style={{ marginTop: '10px', fontSize: '12px' }}>Top selling products</p>
-                </div>
-                <div className="col-md-4" style={{ marginBottom: '20px' }}>
-                  <Link href="/dashboard/reports/visitors" className="btn btn-block btn-default">
-                    <i className="fa fa-eye"></i><br />
-                    Visitors
-                  </Link>
-                  <p style={{ marginTop: '10px', fontSize: '12px' }}>Site traffic analysis</p>
-                </div>
-                <div className="col-md-4" style={{ marginBottom: '20px' }}>
-                  <Link href="/dashboard/reports/referrers" className="btn btn-block btn-default">
-                    <i className="fa fa-link"></i><br />
-                    Referrers
-                  </Link>
-                  <p style={{ marginTop: '10px', fontSize: '12px' }}>Traffic sources</p>
-                </div>
-                <div className="col-md-4" style={{ marginBottom: '20px' }}>
-                  <Link href="/dashboard/reports/search-terms" className="btn btn-block btn-default">
-                    <i className="fa fa-search"></i><br />
-                    Search Terms
-                  </Link>
-                  <p style={{ marginTop: '10px', fontSize: '12px' }}>Popular searches</p>
-                </div>
-                <div className="col-md-4" style={{ marginBottom: '20px' }}>
-                  <Link href="/dashboard/reports/cart-abandonment" className="btn btn-block btn-default">
-                    <i className="fa fa-shopping-cart"></i><br />
-                    Cart Abandonment
-                  </Link>
-                  <p style={{ marginTop: '10px', fontSize: '12px' }}>Lost sales recovery</p>
-                </div>
-                <div className="col-md-4" style={{ marginBottom: '20px' }}>
-                  <Link href="/dashboard/reports/gift-cards" className="btn btn-block btn-default">
-                    <i className="fa fa-gift"></i><br />
-                    Gift Certificates
-                  </Link>
-                  <p style={{ marginTop: '10px', fontSize: '12px' }}>Gift card activity</p>
-                </div>
-                <div className="col-md-4">
-                  <Link href="/dashboard/reports/inventory-notify" className="btn btn-block btn-default">
-                    <i className="fa fa-bell"></i><br />
-                    Inventory Notify
-                  </Link>
-                  <p style={{ marginTop: '10px', fontSize: '12px' }}>Restock requests</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
+      {!loading && result.length > 0 && (
+        <div style={{ marginTop: '20px' }}>
+          To download this data in a CSV file,{' '}
+          <a href={`/api/reports/download?type=bnc&time_period=${timePeriod}`}>click here</a>
+        </div>
       )}
     </div>
   );

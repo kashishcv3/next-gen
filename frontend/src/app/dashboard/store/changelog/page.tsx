@@ -2,89 +2,271 @@
 
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
+import { useStore } from '@/context/StoreContext';
 
-interface ChangelogEntry {
-  id: string;
-  title: string;
-  description: string;
-  changed_by: string;
-  changed_date: string;
-  version: string;
+/**
+ * Store Change Log page.
+ * Replicates old platform's store_changelog.tpl exactly.
+ * Queries change_log table in per-store DB via Log_Class::get().
+ */
+
+interface LogEntry {
+  user_id: string;
+  action: string;
+  specific_information: string;
+  difference: string;
+  ndate: string;
 }
 
-export default function ChangelogPage() {
-  const [entries, setEntries] = useState<ChangelogEntry[]>([]);
+export default function StoreChangelogPage() {
+  const { siteId } = useStore();
+
+  const [log, setLog] = useState<LogEntry[]>([]);
+  const [users, setUsers] = useState<Record<string, string>>({});
+  const [actions, setActions] = useState<Record<string, string>>({});
+  const [isBigadmin, setIsBigadmin] = useState(false);
+  const [logDifference, setLogDifference] = useState('n');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchChangelog();
-  }, []);
+  // Search filters
+  const [filterUser, setFilterUser] = useState('');
+  const [filterAction, setFilterAction] = useState('');
+  const [filterLast, setFilterLast] = useState('30');
 
-  const fetchChangelog = async () => {
+  // Popover state
+  const [activePopover, setActivePopover] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (siteId) fetchChangelog();
+  }, [siteId]);
+
+  const fetchChangelog = async (
+    userFilter = filterUser,
+    actionFilter = filterAction,
+    lastFilter = filterLast
+  ) => {
     try {
-      const res = await api.get('/store/changelog');
-      setEntries(res.data.data || []);
+      setLoading(true);
+      const params: Record<string, string> = {};
+      if (userFilter) params.user_filter = userFilter;
+      if (actionFilter) params.action_filter = actionFilter;
+      if (lastFilter) params.last = lastFilter;
+
+      const res = await api.get(`/store-changelog/log/${siteId}`, { params });
+      const data = res.data;
+
+      setLog(data.log || []);
+      setUsers(data.users || {});
+      setActions(data.actions || {});
+      setIsBigadmin(data.bigadmin === 'y');
+      setLogDifference(data.log_difference || 'n');
+
+      if (data.search) {
+        setFilterUser(data.search.user || '');
+        setFilterAction(data.search.log_action || '');
+        setFilterLast(data.search.last || '30');
+      }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load changelog');
+      setError(err.response?.data?.detail || 'Failed to load changelog');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    fetchChangelog(filterUser, filterAction, filterLast);
+  };
+
+  const togglePopover = (idx: number) => {
+    setActivePopover(activePopover === idx ? null : idx);
+  };
+
+  if (loading && log.length === 0) {
+    return (
+      <div className="row">
+        <div className="col-lg-12"><p>Loading...</p></div>
+      </div>
+    );
+  }
+
   return (
-    <div>
+    <>
+      <style>{`
+        .sql-popover {
+          position: relative;
+          display: inline-block;
+        }
+        .sql-popover-content {
+          position: absolute;
+          bottom: 100%;
+          left: 50%;
+          transform: translateX(-50%);
+          background: #fff;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          padding: 10px;
+          max-width: 400px;
+          max-height: 300px;
+          overflow: auto;
+          word-wrap: break-word;
+          z-index: 1000;
+          box-shadow: 0 2px 8px rgba(0,0,0,.2);
+          font-size: 12px;
+          font-family: monospace;
+        }
+        .sql-popover-content h4 {
+          margin: 0 0 8px 0;
+          font-size: 13px;
+          font-weight: bold;
+          border-bottom: 1px solid #eee;
+          padding-bottom: 5px;
+        }
+      `}</style>
+
       <div className="row">
         <div className="col-lg-12">
-          <h1>Store Changelog</h1>
-          <p>
-            <i className="fa fa-info-circle"></i> View the history of changes made to your store.
-          </p>
+          <h1>Store Change Log</h1>
         </div>
       </div>
       <br />
 
       {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
-          </div>
-        </div>
+        <div className="alert alert-danger">{error}</div>
       )}
 
-      {!loading && (
+      {/* Filter Form — matches old platform store_changelog.tpl exactly */}
+      <form onSubmit={handleSearch}>
         <div className="row">
           <div className="col-lg-12">
-            {entries.length > 0 ? (
-              entries.map(entry => (
-                <div key={entry.id} className="panel panel-default">
-                  <div className="panel-heading">
-                    <h3 className="panel-title">
-                      Version {entry.version}: {entry.title}
-                    </h3>
-                  </div>
-                  <div className="panel-body">
-                    <p>{entry.description}</p>
-                    <small>
-                      Changed by {entry.changed_by} on {new Date(entry.changed_date).toLocaleDateString()}
-                    </small>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="alert alert-info">No changelog entries found</div>
-            )}
+            <div className="table-responsive">
+              <table className="table cv3-data-table">
+                <tbody>
+                  <tr>
+                    <td>
+                      <select
+                        name="user"
+                        className="form-control form-control-inline"
+                        value={filterUser}
+                        onChange={(e) => setFilterUser(e.target.value)}
+                      >
+                        <option value="">--Choose User--</option>
+                        {Object.entries(users).map(([uid, username]) => (
+                          <option key={uid} value={uid}>
+                            {username}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        name="log_action"
+                        className="form-control form-control-inline"
+                        value={filterAction}
+                        onChange={(e) => setFilterAction(e.target.value)}
+                      >
+                        <option value="">--Choose Action--</option>
+                        {Object.entries(actions).map(([action, label]) => (
+                          <option key={action} value={action}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      Show last{' '}
+                      <input
+                        type="text"
+                        className="form-control form-control-inline"
+                        name="last"
+                        size={3}
+                        value={filterLast}
+                        onChange={(e) => setFilterLast(e.target.value)}
+                        style={{ width: '60px', display: 'inline-block' }}
+                      />{' '}
+                      records
+                    </td>
+                    <td>
+                      <button type="submit" className="btn btn-primary">
+                        Modify Report
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      )}
+      </form>
 
-      {loading && (
-        <div className="row">
-          <div className="col-lg-12">
-            <p>Loading...</p>
+      {/* Changelog Table — matches old platform exactly */}
+      <div className="row">
+        <div className="col-lg-12">
+          <div className="well well-cv3-table">
+            <div className="table-responsive">
+              <table className="table table-hover table-striped cv3-data-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>Extra</th>
+                    <th>Difference</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {log.length > 0 ? (
+                    log.map((entry, idx) => (
+                      <tr key={idx}>
+                        <td>{users[entry.user_id] || entry.user_id}</td>
+                        <td>{entry.action}</td>
+                        <td>{entry.specific_information}</td>
+                        <td>
+                          {isBigadmin && logDifference === 'y' && entry.difference && (
+                            <span className="sql-popover">
+                              [
+                              <a
+                                href="#"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  togglePopover(idx);
+                                }}
+                              >
+                                View SQL
+                              </a>
+                              ]
+                              {activePopover === idx && (
+                                <div className="sql-popover-content">
+                                  <h4>SQL</h4>
+                                  <div
+                                    dangerouslySetInnerHTML={{
+                                      __html: entry.difference
+                                        .replace(/"/g, '&#34;')
+                                        .replace(/,/g, '<br/>'),
+                                    }}
+                                  />
+                                </div>
+                              )}
+                            </span>
+                          )}
+                        </td>
+                        <td>{entry.ndate}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center' }}>
+                        No changelog entries found
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }

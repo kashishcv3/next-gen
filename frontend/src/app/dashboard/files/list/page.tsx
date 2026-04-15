@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Container, Row, Col, Button, Alert, Spinner, Card, Form, Badge, Table } from 'react-bootstrap';
+import { Container, Row, Col, Button, Alert, Spinner, Card, Form, Badge, Table } from '@/lib/react-bootstrap';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 

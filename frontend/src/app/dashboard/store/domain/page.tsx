@@ -2,199 +2,160 @@
 
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
+import { useStore } from '@/context/StoreContext';
 
-interface DomainSettings {
-  primary_domain: string;
-  secondary_domains: string[];
-  ssl_enabled: boolean;
-  ssl_cert_path?: string;
-}
+/**
+ * Domain Name Management page.
+ * Replicates old platform's store_domain.tpl exactly.
+ * Panel with: Edit Current Domain, Edit Secure Domain, CDN Domain (display).
+ * On submit: updates domain, shows finish page with link.
+ */
 
 export default function StoreDomainPage() {
-  const [settings, setSettings] = useState<DomainSettings>({
-    primary_domain: '',
-    secondary_domains: [],
-    ssl_enabled: false,
-  });
+  const { siteId } = useStore();
+
+  const [domain, setDomain] = useState('');
+  const [secureDomain, setSecureDomain] = useState('');
+  const [cdnBucket, setCdnBucket] = useState('');
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [newDomain, setNewDomain] = useState('');
+  const [finished, setFinished] = useState(false);
 
   useEffect(() => {
-    fetchSettings();
-  }, []);
+    if (siteId) fetchDomain();
+  }, [siteId]);
 
-  const fetchSettings = async () => {
+  const fetchDomain = async () => {
     try {
-      const res = await api.get('/store/domain');
-      setSettings(res.data.data);
+      setLoading(true);
+      const res = await api.get(`/store-domain/domain/${siteId}`);
+      setDomain(res.data.domain || '');
+      setSecureDomain(res.data.secure_domain || '');
+      setCdnBucket(res.data.cdn_bucket || '');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load domain settings');
+      setError(err.response?.data?.detail || 'Failed to load domain info');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, type, checked } = e.target;
-    setSettings(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value,
-    }));
-  };
-
-  const handleAddDomain = () => {
-    if (newDomain.trim()) {
-      setSettings(prev => ({
-        ...prev,
-        secondary_domains: [...prev.secondary_domains, newDomain],
-      }));
-      setNewDomain('');
-    }
-  };
-
-  const handleRemoveDomain = (index: number) => {
-    setSettings(prev => ({
-      ...prev,
-      secondary_domains: prev.secondary_domains.filter((_, i) => i !== index),
-    }));
-  };
-
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
     setError(null);
+    setSaving(true);
 
     try {
-      await api.put('/store/domain', settings);
-      setError(null);
+      await api.post(`/store-domain/domain/${siteId}`, {
+        domain: domain,
+        secure_domain: secureDomain,
+      });
+      setFinished(true);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to update domain settings');
+      setError(err.response?.data?.detail || 'Failed to update domain');
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
   if (loading) {
     return (
       <div className="row">
-        <div className="col-lg-12">
-          <p>Loading...</p>
-        </div>
+        <div className="col-lg-12"><p>Loading...</p></div>
       </div>
     );
   }
 
+  // Finish page (matches store_domain_finish.tpl)
+  if (finished) {
+    return (
+      <>
+        <br /><br />
+        <div className="row">
+          <div className="col-lg-12">
+            You can access your store with the following domain after it has been updated by the systems administrator
+            {domain ? (
+              <>
+                &nbsp;&nbsp; -{' '}
+                <a href={`http://${domain}`} target="_blank" rel="noreferrer">
+                  {domain}
+                </a>
+                <br />
+              </>
+            ) : (
+              <>
+                &nbsp;&nbsp; - You have no domains listed<br />
+              </>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
+
   return (
-    <div>
+    <>
       <div className="row">
         <div className="col-lg-12">
-          <h1>Domain Settings</h1>
-          <p>
-            <i className="fa fa-info-circle"></i> Configure domain and SSL settings for your store.
-          </p>
+          <h1>Domain Name Management</h1>
         </div>
       </div>
       <br />
+      <p className="help-block">
+        Domains should be in the following form:&nbsp;<em>colormaria.com</em>
+      </p>
+      <p className="text-danger">
+        *Do not include a prefix (such as www). All prefixes will be forwarded to your store.
+      </p>
 
-      {error && (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="alert alert-danger">{error}</div>
-          </div>
-        </div>
-      )}
+      {error && <div className="alert alert-danger">{error}</div>}
 
-      <form onSubmit={handleSubmit}>
-        <div className="row">
-          <div className="col-lg-8">
+      <div className="row">
+        <div className="col-lg-12">
+          <form onSubmit={handleSubmit}>
             <div className="panel panel-primary">
               <div className="panel-heading">
-                <h3 className="panel-title"><i className="fa fa-globe"></i> Domain Configuration</h3>
+                <h3 className="panel-title"><i className="fa fa-cogs"></i> Domain Name Management</h3>
               </div>
               <div className="panel-body">
                 <div className="form-group">
-                  <label>Primary Domain *</label>
+                  <label>Edit Current Domain</label>
                   <input
                     type="text"
                     className="form-control"
-                    name="primary_domain"
-                    value={settings.primary_domain}
-                    onChange={handleInputChange}
-                    required
+                    name="domain"
+                    value={domain}
+                    onChange={(e) => setDomain(e.target.value)}
+                    size={50}
                   />
                 </div>
-
                 <div className="form-group">
-                  <label><input type="checkbox" name="ssl_enabled" checked={settings.ssl_enabled} onChange={handleInputChange} /> Enable SSL</label>
+                  <label>Edit Secure Domain</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    name="secure_domain"
+                    value={secureDomain}
+                    onChange={(e) => setSecureDomain(e.target.value)}
+                    size={50}
+                  />
                 </div>
-
-                {settings.ssl_enabled && (
-                  <div className="form-group">
-                    <label>SSL Certificate Path</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      name="ssl_cert_path"
-                      value={settings.ssl_cert_path || ''}
-                      onChange={handleInputChange}
-                    />
-                  </div>
-                )}
-
-                <hr />
-
                 <div className="form-group">
-                  <label>Secondary Domains</label>
-                  <div className="input-group">
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={newDomain}
-                      onChange={(e) => setNewDomain(e.target.value)}
-                      placeholder="example.com"
-                    />
-                    <span className="input-group-btn">
-                      <button
-                        type="button"
-                        className="btn btn-default"
-                        onClick={handleAddDomain}
-                      >
-                        Add
-                      </button>
-                    </span>
-                  </div>
-
-                  {settings.secondary_domains.length > 0 && (
-                    <div style={{ marginTop: '10px' }}>
-                      {settings.secondary_domains.map((domain, index) => (
-                        <div key={index} className="alert alert-info" style={{ marginBottom: '5px' }}>
-                          <button
-                            type="button"
-                            className="close"
-                            onClick={() => handleRemoveDomain(index)}
-                          >
-                            <span>&times;</span>
-                          </button>
-                          {domain}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <label>CDN Domain</label>
+                  <div>{cdnBucket || 'none'}</div>
                 </div>
               </div>
             </div>
-
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Saving...' : 'Save Settings'}
-            </button>
-            <a href="/store/overview" className="btn btn-default">
-              Cancel
-            </a>
-          </div>
+            <input
+              type="submit"
+              name="submit"
+              value={saving ? 'Saving...' : 'Submit'}
+              className="btn btn-primary"
+              disabled={saving}
+            />
+          </form>
         </div>
-      </form>
-    </div>
+      </div>
+    </>
   );
 }

@@ -3,11 +3,13 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
+import { useStore } from '@/context/StoreContext';
 import { useRouter, usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
 
 export default function Header() {
   const { user, logout } = useAuth();
+  const { siteId } = useStore();
   const router = useRouter();
   const pathname = usePathname();
   const [showSupport, setShowSupport] = useState(false);
@@ -74,7 +76,7 @@ export default function Header() {
             <span className="icon-bar"></span>
             <span className="icon-bar"></span>
           </button>
-          <Link className="navbar-brand" href="/dashboard">
+          <Link className="navbar-brand" href={user?.uid ? `/dashboard/mainpage/${user.uid}` : '/dashboard'}>
             <img src="/images/cv3_logo_white.png" alt="CV3" style={{ marginTop: '10px' }} />
           </Link>
         </div>
@@ -88,7 +90,7 @@ export default function Header() {
             {hasStoreContext && (
               <>
                 <li className={activeSection === 'site' ? 'active' : ''}>
-                  <Link href="/dashboard"><i className="fa fa-cube"></i> Dashboard</Link>
+                  <Link href={siteId ? `/dashboard/links/${siteId}` : '/dashboard'}><i className="fa fa-cube"></i> Dashboard</Link>
                 </li>
                 <li className={activeSection === 'orders' ? 'active' : ''}>
                   <Link href="/dashboard/orders/list"><i className="fa fa-tags"></i> Orders</Link>

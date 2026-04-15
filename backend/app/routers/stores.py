@@ -504,3 +504,42 @@ def create_google_base(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/settings")
+def get_store_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Get store settings including category_sort, include_cat_prod_links, etc.
+    """
+    try:
+        query = text("""
+            SELECT category_sort, include_cat_prod_links, admin_search_boxes, ebook_options
+            FROM store_settings
+            LIMIT 1
+        """)
+
+        result = db.execute(query).fetchone()
+
+        if not result:
+            return {
+                "category_sort": "sorted",
+                "include_cat_prod_links": "y",
+                "admin_search_boxes": "n",
+                "ebook_options": "n"
+            }
+
+        return {
+            "category_sort": result.category_sort or "sorted",
+            "include_cat_prod_links": result.include_cat_prod_links or "y",
+            "admin_search_boxes": result.admin_search_boxes or "n",
+            "ebook_options": result.ebook_options or "n",
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )

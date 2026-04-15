@@ -4,7 +4,7 @@ from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
-from app.database import get_db
+from app.database import get_db, get_store_db_name, get_store_session
 from app.models.user import User
 from app.dependencies import get_current_user
 
@@ -17,6 +17,12 @@ class OrderItemDetail(BaseModel):
     quantity: float
     unit_price: float
     total: float
+    od_subscription: Optional[str] = None
+    od_subscription_id: Optional[str] = None
+    od_subscription_frequency: Optional[str] = None
+    od_active_subscription: Optional[str] = None
+    extra: Optional[str] = None
+    artifi_design_id: Optional[str] = None
 
 
 class OrderItem(BaseModel):
@@ -31,9 +37,29 @@ class OrderItem(BaseModel):
     payment_method: Optional[str] = None
     invalid: Optional[str] = None
     incomplete: Optional[str] = None
+    tracking: Optional[str] = None
+    cs_note: Optional[str] = None
+    active: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class ShipToAddress(BaseModel):
+    uship_id: int
+    ship_name: str
+    address1: str
+    address2: Optional[str] = None
+    city: str
+    state: str
+    zip: str
+    country: str
+    message: Optional[str] = None
+    subtotal: float
+    detail_tax: float
+    detail_ship: float
+    gifttotal: float
+    products: List[OrderItemDetail]
 
 
 class OrderDetail(BaseModel):
@@ -44,6 +70,7 @@ class OrderDetail(BaseModel):
     total_price: float
     total_tax: float
     total_shipping: float
+    total_fees: float = 0
     status: str
     date_ordered: str
     date_updated: Optional[str] = None
@@ -57,19 +84,20 @@ class OrderDetail(BaseModel):
     billing_zip: str
     billing_country: str
     billing_phone: Optional[str] = None
-    shipping_name: str
-    shipping_address1: str
-    shipping_address2: Optional[str] = None
-    shipping_city: str
-    shipping_state: str
-    shipping_zip: str
-    shipping_country: str
-    shipping_method: Optional[str] = None
+    active: Optional[str] = None
+    subtotal: float = 0
+    discount: float = 0
+    discount_type: Optional[str] = None
+    gifttotal: float = 0
+    cust_1: Optional[str] = None
+    cust_2: Optional[str] = None
+    cust_3: Optional[str] = None
+    comments: Optional[str] = None
+    order_details: List[ShipToAddress]
     items: List[OrderItemDetail]
     invalid: Optional[str] = None
     incomplete: Optional[str] = None
     tracking: Optional[str] = None
-    comments: Optional[str] = None
 
 
 class OrderList(BaseModel):
@@ -96,14 +124,29 @@ def list_orders(
     search_by: Optional[str] = None,
     search_for: Optional[str] = None,
     incomplete_paypal: Optional[str] = None,
+    amazon_pay: Optional[str] = None,
+    amazon_pay_status: Optional[str] = None,
+    amazon_pay_orderid: Optional[str] = None,
+    subscription_orders: Optional[str] = None,
     use_wildcard: Optional[str] = None,
 ):
     """
     List orders for the store with optional filtering.
     Requires site_id parameter for store context.
     """
+    store_db = None
     try:
         skip = (page - 1) * page_size
+
+        # Get per-store database connection
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store database not found for this site",
+            )
+
+        store_db = get_store_session(store_db_name)
 
         # Build the base query
         query = """
@@ -112,7 +155,8 @@ def list_orders(
                    ui.email as customer_email,
                    fo.total_price, fo.status,
                    DATE_FORMAT(fo.date_ordered, '%m/%d/%Y %H:%i:%s') as date_ordered,
-                   fo.ip, fo.payment_method, fo.invalid, fo.incomplete
+                   fo.ip, fo.payment_method, fo.invalid, fo.incomplete,
+                   fo.tracking, fo.customer_service_note as cs_note, COALESCE(ui.active, '0') as active
             FROM full_order fo
             JOIN user_info ui ON fo.user_id = ui.user_id
             WHERE 1=1
@@ -131,13 +175,13 @@ def list_orders(
                 else:
                     query += " AND fo.order_id = :order_id"
                     params["order_id"] = int(search_for)
-            elif search_by == "email":
+            elif search_by == "email" or search_by == "ui.email":
                 if use_wildcard == "y":
                     query += " AND ui.email LIKE CONCAT('%', :search_for, '%')"
                 else:
                     query += " AND ui.email = :search_for"
                 params["search_for"] = search_for
-            elif search_by == "last_name":
+            elif search_by == "last_name" or search_by == "ui.last_name":
                 if use_wildcard == "y":
                     query += " AND ui.last_name LIKE CONCAT('%', :search_for, '%')"
                 else:
@@ -160,11 +204,25 @@ def list_orders(
 
         # Add incomplete paypal filter
         if incomplete_paypal == "y":
-            query += " AND (fo.payment_method = 'paypal_express' OR fo.payment_method = 'paypal') AND (fo.paypal_buyer = '' OR fo.paypal_buyer IS NULL) AND fo.invalid = 'y'"
+            query += " AND (fo.payment_method = 'paypal_express' OR fo.payment_method = 'paypal') AND (fo.paypal_buyer = '' OR fo.paypal_buyer IS NULL)"
+
+        # Add Amazon Pay filter
+        if amazon_pay == "y":
+            query += " AND fo.payment_method = 'amazon_pay'"
+            if amazon_pay_status:
+                query += " AND fo.amazon_pay_status = :amazon_pay_status"
+                params["amazon_pay_status"] = amazon_pay_status
+            if amazon_pay_orderid:
+                query += " AND fo.amazon_order_id = :amazon_pay_orderid"
+                params["amazon_pay_orderid"] = amazon_pay_orderid
+
+        # Add subscription orders filter
+        if subscription_orders == "y":
+            query += " AND EXISTS (SELECT 1 FROM order_detail od JOIN product_subscription ps ON od.product_id = ps.product_id WHERE od.order_id = fo.order_id)"
 
         # Count total results
         count_query = f"SELECT COUNT(*) as cnt FROM ({query}) as subquery"
-        count_result = db.execute(text(count_query), params).fetchone()
+        count_result = store_db.execute(text(count_query), params).fetchone()
         total = count_result[0] if count_result else 0
 
         # Add pagination and ordering
@@ -173,7 +231,7 @@ def list_orders(
         params["offset"] = skip
 
         # Execute query
-        results = db.execute(text(query), params).fetchall()
+        results = store_db.execute(text(query), params).fetchall()
 
         items = []
         for row in results:
@@ -190,16 +248,24 @@ def list_orders(
                     payment_method=row[8],
                     invalid=row[9],
                     incomplete=row[10],
+                    tracking=row[11],
+                    cs_note=row[12],
+                    active=row[13],
                 )
             )
 
         return OrderList(total=total, page=page, page_size=page_size, items=items)
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching orders: {str(e)}",
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.get("/pending", response_model=OrderList)
@@ -213,8 +279,19 @@ def get_pending_orders(
     """
     Get pending/new orders for the store.
     """
+    store_db = None
     try:
         skip = (page - 1) * page_size
+
+        # Get per-store database connection
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store database not found for this site",
+            )
+
+        store_db = get_store_session(store_db_name)
 
         query = """
             SELECT COUNT(*) as cnt FROM full_order fo
@@ -222,7 +299,7 @@ def get_pending_orders(
             WHERE fo.status IN ('pending', 'new')
         """
 
-        count_result = db.execute(text(query)).fetchone()
+        count_result = store_db.execute(text(query)).fetchone()
         total = count_result[0] if count_result else 0
 
         query = """
@@ -239,7 +316,7 @@ def get_pending_orders(
             LIMIT :limit OFFSET :offset
         """
 
-        results = db.execute(text(query), {"limit": page_size, "offset": skip}).fetchall()
+        results = store_db.execute(text(query), {"limit": page_size, "offset": skip}).fetchall()
 
         items = []
         for row in results:
@@ -261,11 +338,16 @@ def get_pending_orders(
 
         return OrderList(total=total, page=page, page_size=page_size, items=items)
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching pending orders: {str(e)}",
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.get("/{order_id}", response_model=OrderDetail)
@@ -276,9 +358,20 @@ def get_order_detail(
     site_id: int = Query(..., description="Store/site ID"),
 ):
     """
-    Get detailed information about a specific order.
+    Get detailed information about a specific order with multiple shipping addresses.
     """
+    store_db = None
     try:
+        # Get per-store database connection
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store database not found for this site",
+            )
+
+        store_db = get_store_session(store_db_name)
+
         # Get main order information
         query = """
             SELECT fo.order_id, ui.first_name, ui.last_name, ui.email,
@@ -288,51 +381,116 @@ def get_order_detail(
                    fo.payment_method, fo.gateway_payment_method as payment_gateway,
                    fo.transaction_id, ui.billing_address1, ui.billing_address2,
                    ui.billing_city, ui.billing_state, ui.billing_zip,
-                   ui.billing_country, ui.phone, fo.ip,
-                   us.ship_name, us.address1, us.address2, us.city,
-                   us.state, us.zip, us.country,
-                   sh.method as shipping_method, fo.invalid, fo.incomplete,
-                   fo.tracking, fo.comments, fo.trans_id
+                   ui.billing_country, ui.phone, fo.ip, fo.invalid, fo.incomplete,
+                   fo.tracking, fo.comments, fo.subtotal, fo.discount, fo.discount_type,
+                   fo.gift_total, fo.total_fees, COALESCE(ui.active, '0') as active,
+                   ui.custom_field_1 as cust_1, ui.custom_field_2 as cust_2, ui.custom_field_3 as cust_3
             FROM full_order fo
             JOIN user_info ui ON fo.user_id = ui.user_id
-            LEFT JOIN user_shipping us ON us.user_id = ui.user_id AND us.uship_id = (
-                SELECT DISTINCT uship_id FROM order_detail WHERE order_id = :order_id LIMIT 1
-            )
-            LEFT JOIN shipping sh ON sh.shipper_id = (
-                SELECT DISTINCT shipper_id FROM order_detail WHERE order_id = :order_id LIMIT 1
-            )
             WHERE fo.order_id = :order_id
         """
 
-        result = db.execute(text(query), {"order_id": order_id}).fetchone()
+        result = store_db.execute(text(query), {"order_id": order_id}).fetchone()
 
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Order not found"
             )
 
-        # Get order items
-        items_query = """
-            SELECT pr.prod_name, pr.sku, od.quantity,
-                   od.unit_price, (od.quantity * od.unit_price) as total
+        # Get all shipping addresses for this order
+        shipto_query = """
+            SELECT DISTINCT us.uship_id, us.ship_name, us.address1, us.address2,
+                   us.city, us.state, us.zip, us.country,
+                   COALESCE(us.message, '') as message
             FROM order_detail od
-            JOIN products pr ON od.product_id = pr.prod_id
+            JOIN user_shipping us ON od.uship_id = us.uship_id
             WHERE od.order_id = :order_id
+            GROUP BY us.uship_id
+            ORDER BY us.uship_id
         """
 
-        items_results = db.execute(text(items_query), {"order_id": order_id}).fetchall()
+        shipto_results = store_db.execute(text(shipto_query), {"order_id": order_id}).fetchall()
 
-        items = []
-        for item in items_results:
-            items.append(
-                OrderItemDetail(
+        order_details = []
+        items_list = []
+
+        for shipto in shipto_results:
+            uship_id = shipto[0]
+
+            # Get items for this shipping address
+            items_query = """
+                SELECT pr.prod_name, pr.sku, od.quantity,
+                       od.unit_price, (od.quantity * od.unit_price) as total,
+                       COALESCE(od.od_subscription, '') as od_subscription,
+                       COALESCE(od.subscription_id, '') as od_subscription_id,
+                       COALESCE(od.subscription_frequency, '') as od_subscription_frequency,
+                       COALESCE(od.subscription_active, '') as od_active_subscription,
+                       COALESCE(od.extra_options, '') as extra,
+                       COALESCE(od.artifi_design_id, '') as artifi_design_id
+                FROM order_detail od
+                JOIN products pr ON od.product_id = pr.prod_id
+                WHERE od.order_id = :order_id AND od.uship_id = :uship_id
+            """
+
+            items_results = store_db.execute(text(items_query), {"order_id": order_id, "uship_id": uship_id}).fetchall()
+
+            items = []
+            subtotal = 0
+            for item in items_results:
+                item_detail = OrderItemDetail(
                     product_name=item[0],
                     sku=item[1],
                     quantity=float(item[2]),
                     unit_price=float(item[3]),
                     total=float(item[4]),
+                    od_subscription=item[5],
+                    od_subscription_id=item[6],
+                    od_subscription_frequency=item[7],
+                    od_active_subscription=item[8],
+                    extra=item[9],
+                    artifi_design_id=item[10],
                 )
+                items.append(item_detail)
+                subtotal += float(item[4])
+                items_list.append(item_detail)
+
+            # Get shipping details for this address
+            shipping_query = """
+                SELECT COALESCE(sh.method, '') as method, COALESCE(od.tax, 0) as tax, COALESCE(od.shipping_cost, 0) as shipping_cost,
+                       COALESCE(od.gift_wrap_cost, 0) as gift_wrap_cost
+                FROM order_detail od
+                LEFT JOIN shipping sh ON od.shipper_id = sh.shipper_id
+                WHERE od.order_id = :order_id AND od.uship_id = :uship_id
+                LIMIT 1
+            """
+
+            shipping_result = store_db.execute(text(shipping_query), {"order_id": order_id, "uship_id": uship_id}).fetchone()
+
+            detail_tax = 0
+            detail_ship = 0
+            gifttotal = 0
+            if shipping_result:
+                detail_tax = float(shipping_result[1])
+                detail_ship = float(shipping_result[2])
+                gifttotal = float(shipping_result[3])
+
+            shipto_detail = ShipToAddress(
+                uship_id=uship_id,
+                ship_name=shipto[1],
+                address1=shipto[2],
+                address2=shipto[3],
+                city=shipto[4],
+                state=shipto[5],
+                zip=shipto[6],
+                country=shipto[7],
+                message=shipto[8],
+                subtotal=subtotal,
+                detail_tax=detail_tax,
+                detail_ship=detail_ship,
+                gifttotal=gifttotal,
+                products=items,
             )
+            order_details.append(shipto_detail)
 
         return OrderDetail(
             order_id=result[0],
@@ -355,19 +513,21 @@ def get_order_detail(
             billing_country=result[18],
             billing_phone=result[19],
             customer_ip=result[20],
-            shipping_name=result[21] or "",
-            shipping_address1=result[22] or "",
-            shipping_address2=result[23],
-            shipping_city=result[24] or "",
-            shipping_state=result[25] or "",
-            shipping_zip=result[26] or "",
-            shipping_country=result[27] or "",
-            shipping_method=result[28],
-            invalid=result[29],
-            incomplete=result[30],
-            tracking=result[31],
-            comments=result[32],
-            items=items,
+            invalid=result[21],
+            incomplete=result[22],
+            tracking=result[23],
+            comments=result[24],
+            subtotal=float(result[25]) if result[25] else 0,
+            discount=float(result[26]) if result[26] else 0,
+            discount_type=result[27],
+            gifttotal=float(result[28]) if result[28] else 0,
+            total_fees=float(result[29]) if result[29] else 0,
+            active=result[30],
+            cust_1=result[31],
+            cust_2=result[32],
+            cust_3=result[33],
+            order_details=order_details,
+            items=items_list,
         )
 
     except HTTPException:
@@ -377,6 +537,9 @@ def get_order_detail(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching order detail: {str(e)}",
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.get("/options/{site_id}")

@@ -1,5 +1,6 @@
 import Layout from '@/components/layout/Layout';
 import Script from 'next/script';
+import { StoreProvider } from '@/context/StoreContext';
 
 export default function DashboardLayout({
   children,
@@ -52,9 +53,11 @@ export default function DashboardLayout({
         strategy="afterInteractive"
       />
 
-      <Layout>
-        {children}
-      </Layout>
+      <StoreProvider>
+        <Layout>
+          {children}
+        </Layout>
+      </StoreProvider>
     </>
   );
 }

@@ -9,7 +9,7 @@ from app.dependencies import get_current_admin_user
 from datetime import datetime
 import os
 
-router = APIRouter(prefix="/templates", tags=["templates"])
+router = APIRouter(prefix="/store-templates", tags=["store-templates"])
 
 
 class TemplateItem(BaseModel):
@@ -43,15 +43,17 @@ class TemplateList(BaseModel):
 def list_templates(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
-    sort_by: Optional[str] = Query("common", description="Sort by category"),
+    sort_by: Optional[str] = Query("common", description="Sort by 'common' or 'file'"),
 ):
     """
-    List templates by category.
+    List templates by category with full details matching old platform.
     Mirrors Template_listView functionality.
     """
     try:
+        # Get template categories
         query = text("""
-            SELECT id, name, template_type, last_modified
+            SELECT id, name, common_name, template_type, last_modified,
+                   locked_status, locked_by, is_published, has_changes
             FROM templates
             WHERE inactive IS NULL OR inactive != 'd'
             ORDER BY template_type, name
@@ -61,26 +63,57 @@ def list_templates(
 
         # Group by type
         template_list = {}
+        stylesheets = {}
+        javascript_files = {}
+        other_files = {}
+
         for r in results:
             template_type = r.template_type or "Other"
-            if template_type not in template_list:
-                template_list[template_type] = []
 
-            template_list[template_type].append({
+            item = {
                 "id": r.id,
                 "name": r.name,
+                "file": r.name,
+                "common": r.common_name or r.name,
                 "template_type": r.template_type,
-                "last_modified": r.last_modified.isoformat() if r.last_modified else None,
-            })
+                "last_modified": r.last_modified.isoformat() if r.last_modified else "N/A",
+                "locked": {
+                    "locked_status": r.locked_status or 'n',
+                    "locked_by": r.locked_by,
+                },
+                "changed": r.has_changes == 1 if r.has_changes else False,
+            }
+
+            if r.template_type == "CSS Stylesheets" or template_type.startswith("CSS"):
+                if "CSS Stylesheets" not in stylesheets:
+                    stylesheets["CSS Stylesheets"] = []
+                stylesheets["CSS Stylesheets"].append(item)
+            elif r.template_type == "JavaScript Files" or template_type.startswith("JavaScript"):
+                if "JavaScript Files" not in javascript_files:
+                    javascript_files["JavaScript Files"] = []
+                javascript_files["JavaScript Files"].append(item)
+            elif r.template_type == "Other Files" or template_type.startswith("Other"):
+                if "Other Files" not in other_files:
+                    other_files["Other Files"] = []
+                other_files["Other Files"].append(item)
+            else:
+                if template_type not in template_list:
+                    template_list[template_type] = []
+                template_list[template_type].append(item)
 
         # Create HTML categories for display
         html_categories = {}
-        for header in template_list.keys():
+        for header in list(template_list.keys()) + list(stylesheets.keys()) + list(javascript_files.keys()) + list(other_files.keys()):
             html_categories[header] = '_'.join(header.lower().split())
 
         return {
             "templates": template_list,
+            "stylesheets": stylesheets,
+            "javascript_files": javascript_files,
+            "other_files": other_files,
             "html_categories": html_categories,
+            "unpublished_cats": {},
+            "edit_locked": False,
             "total": len(results),
         }
 
@@ -367,6 +400,180 @@ def get_template_content(
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.post("/{template_name}/publish")
+def publish_template(
+    template_name: str,
+    template_data: dict = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Publish a template (mark as published and remove has_changes flag).
+    """
+    try:
+        update_query = text("""
+            UPDATE templates
+            SET is_published = 1, has_changes = 0, last_modified = NOW()
+            WHERE name = :name
+        """)
+
+        db.execute(update_query, {"name": template_name})
+        db.commit()
+
+        return {"message": "Template published successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.post("/{template_name}/revert")
+def revert_template(
+    template_name: str,
+    template_data: dict = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Revert a template to last published version (remove has_changes flag).
+    """
+    try:
+        update_query = text("""
+            UPDATE templates
+            SET has_changes = 0, last_modified = NOW()
+            WHERE name = :name
+        """)
+
+        db.execute(update_query, {"name": template_name})
+        db.commit()
+
+        return {"message": "Template reverted successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.post("/publish-all")
+def publish_all_templates(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Publish all templates.
+    """
+    try:
+        update_query = text("""
+            UPDATE templates
+            SET is_published = 1, has_changes = 0, last_modified = NOW()
+            WHERE inactive IS NULL OR inactive != 'd'
+        """)
+
+        db.execute(update_query)
+        db.commit()
+
+        return {"message": "All templates published successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.post("/revert-all")
+def revert_all_templates(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Revert all templates.
+    """
+    try:
+        update_query = text("""
+            UPDATE templates
+            SET has_changes = 0, last_modified = NOW()
+            WHERE inactive IS NULL OR inactive != 'd'
+        """)
+
+        db.execute(update_query)
+        db.commit()
+
+        return {"message": "All templates reverted successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.post("/lock/{template_name}")
+def lock_template(
+    template_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Lock a template (admin only).
+    """
+    try:
+        update_query = text("""
+            UPDATE templates
+            SET locked_status = 'y', locked_by = :user, locked_date = NOW()
+            WHERE name = :name
+        """)
+
+        db.execute(update_query, {"name": template_name, "user": current_user.username})
+        db.commit()
+
+        return {"message": "Template locked successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database error: {str(e)}"
+        )
+
+
+@router.post("/unlock/{template_name}")
+def unlock_template(
+    template_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """
+    Unlock a template (admin only).
+    """
+    try:
+        update_query = text("""
+            UPDATE templates
+            SET locked_status = 'n', locked_by = NULL, locked_date = NULL
+            WHERE name = :name
+        """)
+
+        db.execute(update_query, {"name": template_name})
+        db.commit()
+
+        return {"message": "Template unlocked successfully"}
+
+    except Exception as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"

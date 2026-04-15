@@ -25,7 +25,7 @@ interface OrdersResponse {
 
 export default function PendingOrdersPage() {
   const searchParams = useSearchParams();
-  const siteId = searchParams.get('site_id') || '1';
+  // site_id is auto-injected by the API interceptor from StoreContext
 
   const [orders, setOrders] = useState<PendingOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -42,12 +42,9 @@ export default function PendingOrdersPage() {
   const fetchPendingOrders = async () => {
     try {
       setLoading(true);
-      const params = new URLSearchParams();
-      params.append('site_id', siteId);
-      params.append('page', currentPage.toString());
-      params.append('page_size', '20');
-
-      const response = await api.get<OrdersResponse>(`/orders/pending?${params.toString()}`);
+      const response = await api.get<OrdersResponse>('/orders/pending', {
+        params: { page: currentPage, page_size: 20 },
+      });
       setOrders(response.data.items || []);
       setTotalResults(response.data.total || 0);
       setError(null);

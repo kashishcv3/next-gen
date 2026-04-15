@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Container, Row, Col, Button, Table, Form, Alert, Spinner, Card, Badge } from 'react-bootstrap';
+import { Container, Row, Col, Button, Table, Alert, Spinner, Badge, Form } from '@/lib/react-bootstrap';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 
@@ -12,8 +12,9 @@ interface Product {
   is_parent: string;
   inactive: string;
   has_attributes: string;
-  prod_order: number;
-  weight: number;
+  prod_order?: number;
+  weight?: number;
+  rank?: number;
 }
 
 interface Category {
@@ -22,7 +23,12 @@ interface Category {
   rank: number;
   product_count: number;
   products: Product[];
-  expanded: boolean;
+  expanded?: boolean;
+  linked_to?: string;
+}
+
+interface StoreSettings {
+  category_sort?: string;
 }
 
 export default function ProductsListPage() {
@@ -31,19 +37,29 @@ export default function ProductsListPage() {
   const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
+  const [showSpecials, setShowSpecials] = useState(false);
+  const [settings, setSettings] = useState<StoreSettings>({ category_sort: 'sorted' });
 
   useEffect(() => {
-    fetchCategories();
+    fetchData();
   }, []);
 
-  const fetchCategories = async () => {
+  const fetchData = async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await api.get('/products/list');
-      setCategories(response.data.categories || []);
+      const productsRes = await api.get('/products/list');
+      setCategories(productsRes.data.categories || []);
+
+      // Settings endpoint may not exist yet — don't let it block the page
+      try {
+        const settingsRes = await api.get('/store/settings');
+        setSettings(settingsRes.data || { category_sort: 'sorted' });
+      } catch {
+        setSettings({ category_sort: 'sorted' });
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch products');
+      setError(err instanceof Error ? err.message : 'Failed to fetch data');
     } finally {
       setLoading(false);
     }
@@ -57,6 +73,45 @@ export default function ProductsListPage() {
       newExpanded.add(catId);
     }
     setExpandedCategories(newExpanded);
+  };
+
+  const toggleSpecials = () => {
+    setShowSpecials(!showSpecials);
+  };
+
+  const handleDeleteProduct = async (prodId: number) => {
+    if (confirm('Are you sure you want to delete this product?')) {
+      try {
+        await api.delete(`/products/${prodId}`);
+        fetchData();
+      } catch (err) {
+        alert('Failed to delete product');
+      }
+    }
+  };
+
+  const handleCopyProduct = (prodId: number) => {
+    router.push(`/dashboard/products/copy/${prodId}`);
+  };
+
+  const handleAdjustOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const formData = new FormData(e.currentTarget as HTMLFormElement);
+      const orderData: Record<string, number> = {};
+
+      formData.forEach((value, key) => {
+        if (key.startsWith('adj_') || key.startsWith('weight_')) {
+          orderData[key] = parseInt(value.toString());
+        }
+      });
+
+      await api.post('/products/adjust-order', orderData);
+      fetchData();
+      alert('Product order updated successfully');
+    } catch (err) {
+      alert('Failed to update product order');
+    }
   };
 
   if (loading) {
@@ -75,109 +130,240 @@ export default function ProductsListPage() {
 
   return (
     <Container className="mt-4" fluid>
-      <Row className="mb-4">
-        <Col>
-          <h1>Products by Category</h1>
+      <Row className="mb-3">
+        <Col lg={12}>
+          <h1>Products By Category</h1>
+          <p>
+            <i className="fa fa-info-circle"></i> In the product by category listing you are able to view, edit and remove products and subproducts from your store. Not only can you view your products, but you can manage the order in which your products and subproducts are displayed within their category.
+          </p>
         </Col>
-        <Col xs="auto">
-          <Button variant="primary" onClick={() => router.push('/dashboard/products/by-name')}>
-            <i className="fa fa-list"></i> By Name
+      </Row>
+
+      <Row className="mb-3">
+        <Col lg={12}>
+          <Button variant="primary" size="sm" onClick={() => router.push('/dashboard/products/edit')}>
+            <i className="fa fa-plus"></i> Add Product
           </Button>{' '}
-          <Button variant="primary" onClick={() => router.push('/dashboard/products/search')}>
-            <i className="fa fa-search"></i> Search
+          <Button variant="primary" size="sm" onClick={() => router.push('/dashboard/products/copy')}>
+            <i className="fa fa-copy"></i> Copy Product
           </Button>{' '}
-          <Button variant="success" onClick={() => router.push('/dashboard/products/import')}>
-            <i className="fa fa-upload"></i> Import
+          <Button variant="danger" size="sm" onClick={() => router.push('/dashboard/products/delete')}>
+            <i className="fa fa-trash"></i> Delete Product
           </Button>{' '}
-          <Button variant="info" onClick={() => router.push('/dashboard/products/export')}>
-            <i className="fa fa-download"></i> Export
+          <Button variant="primary" size="sm" onClick={() => router.push('/dashboard/products/search')}>
+            <i className="fa fa-search"></i> Product Search
+          </Button>{' '}
+          <Button variant="info" size="sm" onClick={() => router.push('/dashboard/products/custom-fields')}>
+            <i className="fa fa-gear"></i> Custom Field Labels
+          </Button>{' '}
+          <Button
+            variant={showSpecials ? 'success' : 'secondary'}
+            size="sm"
+            onClick={toggleSpecials}
+          >
+            <i className={`fa fa-${showSpecials ? 'check-' : ''}square`}></i> Display Specials
           </Button>
         </Col>
       </Row>
 
       {error && <Alert variant="danger">{error}</Alert>}
 
-      <Card>
-        <Card.Body>
-          {categories.length === 0 ? (
-            <Alert variant="info">No categories found</Alert>
-          ) : (
-            <div className="list-group">
-              {categories.map((category) => (
-                <div key={category.cat_id} className="mb-3">
-                  <div
-                    className="p-3 bg-light border"
-                    role="button"
-                    onClick={() => toggleCategory(category.cat_id)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <div className="d-flex justify-content-between align-items-center">
-                      <div>
-                        <i
-                          className={`fa fa-chevron-${
-                            expandedCategories.has(category.cat_id) ? 'down' : 'right'
-                          }`}
-                        ></i>
-                        {' '}
-                        <strong>{category.name}</strong>
-                        {category.inactive && category.inactive !== 'n' && (
-                          <Badge bg="warning" className="ms-2">
-                            Inactive
-                          </Badge>
-                        )}
-                      </div>
-                      <Badge bg="secondary">{category.product_count || 0} products</Badge>
-                    </div>
-                  </div>
+      <Form onSubmit={handleAdjustOrder}>
+        <Row className="mb-3">
+          <Col lg={12}>
+            {settings.category_sort === 'sorted' && (
+              <div className="text-center mb-3">
+                <Button type="submit" variant="primary" id="topBtn">
+                  Adjust Product Order
+                </Button>
+              </div>
+            )}
+            {settings.category_sort === 'weighted' && (
+              <div className="text-center mb-3">
+                <Button type="submit" variant="primary" id="topBtn">
+                  Adjust Product Weights
+                </Button>
+              </div>
+            )}
+          </Col>
+        </Row>
 
-                  {expandedCategories.has(category.cat_id) && category.products && (
-                    <Table hover size="sm" className="mb-0 mt-2">
-                      <thead>
-                        <tr>
-                          <th>Product Name</th>
-                          <th>SKU</th>
-                          <th>Type</th>
-                          <th>Status</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {category.products.map((product) => (
-                          <tr key={product.prod_id}>
-                            <td>{product.prod_name}</td>
-                            <td>{product.sku}</td>
-                            <td>
-                              {product.is_parent === 'y' && <Badge bg="info">Parent</Badge>}
-                              {product.has_attributes === 'y' && <Badge bg="info">Attributes</Badge>}
-                            </td>
-                            <td>
-                              {product.inactive && product.inactive !== 'n' ? (
-                                <Badge bg="danger">Inactive</Badge>
+        <Row>
+          <Col lg={12}>
+            <div className="table-responsive">
+              <Table hover striped className="cv3-data-table">
+                <thead>
+                  <tr>
+                    <th colSpan={2}>Products by Category</th>
+                    <th className="text-center">
+                      {settings.category_sort === 'sorted'
+                        ? 'Adjust Order'
+                        : settings.category_sort === 'weighted'
+                        ? 'Adjust Weight'
+                        : ''}
+                    </th>
+                    <th className="text-center">SKU</th>
+                    <th className="text-center">Prod ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {categories.map((category) => (
+                    <React.Fragment key={category.cat_id}>
+                      <tr>
+                        <td colSpan={3}>
+                          {!category.linked_to && category.product_count > 0 ? (
+                            <a
+                              href="javascript:void(0)"
+                              onClick={() => toggleCategory(category.cat_id)}
+                              style={{ textDecoration: 'none' }}
+                            >
+                              {expandedCategories.has(category.cat_id) ? (
+                                <i className="fa fa-minus-square"></i>
                               ) : (
-                                <Badge bg="success">Active</Badge>
+                                <i className="fa fa-plus-square"></i>
                               )}
-                            </td>
-                            <td>
-                              <Button
-                                variant="sm"
-                                onClick={() =>
-                                  router.push(`/dashboard/products/edit/${product.prod_id}`)
-                                }
-                              >
-                                <i className="fa fa-edit"></i>
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </Table>
-                  )}
-                </div>
-              ))}
+                            </a>
+                          ) : (
+                            <img src="/images/spacer.gif" alt="spacer" style={{ width: '14px', height: '0px', display: 'inline' }} />
+                          )}
+                          {' '}
+                          {category.linked_to ? (
+                            <>
+                              <strong>{category.name}</strong> (linked)
+                            </>
+                          ) : (
+                            <a
+                              name={`cat_${category.cat_id}`}
+                              href="javascript:void(0)"
+                              onClick={() => toggleCategory(category.cat_id)}
+                            >
+                              {category.name}
+                            </a>
+                          )}
+                        </td>
+                        <td className="text-center">&nbsp;</td>
+                        <td className="text-center">&nbsp;</td>
+                      </tr>
+
+                      {expandedCategories.has(category.cat_id) && !category.linked_to && (
+                        <>
+                          {category.products.map((product) => (
+                            <tr key={product.prod_id}>
+                              <td>&nbsp;</td>
+                              <td>
+                                <a href={`/dashboard/products/edit/${product.prod_id}`}>
+                                  {product.prod_name || '[no product name]'}
+                                </a>
+                                {product.is_parent === 'y' && (
+                                  <>
+                                    {' '}
+                                    <Badge bg="secondary">
+                                      <a href={`/dashboard/products/${product.prod_id}/subproducts`}>
+                                        View Sub-Products
+                                      </a>
+                                    </Badge>
+                                  </>
+                                )}
+                                {product.has_attributes === 'y' && (
+                                  <>
+                                    {' '}
+                                    <Badge bg="secondary">
+                                      <a href={`/dashboard/products/${product.prod_id}/attributes`}>
+                                        View Attributes
+                                      </a>
+                                    </Badge>
+                                  </>
+                                )}
+                                {product.inactive === 'y' && (
+                                  <>
+                                    {' '}
+                                    <Badge bg="danger">Inactive</Badge>
+                                  </>
+                                )}
+                              </td>
+                              <td className="text-center">
+                                {category.cat_id !== 0 && (
+                                  <>
+                                    {settings.category_sort === 'sorted' && (
+                                      <Form.Control
+                                        type="text"
+                                        name={`adj_${category.cat_id}_${product.prod_id}_${product.rank || 0}`}
+                                        defaultValue={product.rank || 0}
+                                        size="sm"
+                                        style={{ width: '60px' }}
+                                      />
+                                    )}
+                                    {settings.category_sort === 'weighted' && (
+                                      <Form.Control
+                                        type="text"
+                                        name={`weight_${category.cat_id}_${product.prod_id}_${product.weight || 0}`}
+                                        defaultValue={product.weight || 0}
+                                        size="sm"
+                                        style={{ width: '80px' }}
+                                      />
+                                    )}
+                                  </>
+                                )}
+                              </td>
+                              <td className="text-center">{product.sku}</td>
+                              <td className="text-center">{product.prod_id}</td>
+                            </tr>
+                          ))}
+                        </>
+                      )}
+                    </React.Fragment>
+                  ))}
+
+                  {/* Online Specials Section */}
+                  <tr>
+                    <td colSpan={3}>
+                      <a
+                        href="javascript:void(0)"
+                        onClick={toggleSpecials}
+                        style={{ textDecoration: 'none' }}
+                      >
+                        {showSpecials ? (
+                          <i className="fa fa-minus-square"></i>
+                        ) : (
+                          <i className="fa fa-plus-square"></i>
+                        )}
+                      </a>
+                      {' '}
+                      <a
+                        name="o"
+                        href="javascript:void(0)"
+                        onClick={toggleSpecials}
+                      >
+                        Online Specials
+                      </a>
+                    </td>
+                    <td className="text-center">&nbsp;</td>
+                    <td className="text-center">&nbsp;</td>
+                  </tr>
+                </tbody>
+              </Table>
             </div>
-          )}
-        </Card.Body>
-      </Card>
+          </Col>
+        </Row>
+
+        <Row className="mt-3">
+          <Col lg={12} className="text-center">
+            {settings.category_sort === 'sorted' && (
+              <Button type="submit" variant="primary">
+                Adjust Product Order
+              </Button>
+            )}
+            {settings.category_sort === 'weighted' && (
+              <Button type="submit" variant="primary">
+                Adjust Product Weights
+              </Button>
+            )}
+          </Col>
+        </Row>
+      </Form>
     </Container>
   );
 }
+
+// Add React import for Fragment
+import React from 'react';

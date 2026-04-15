@@ -69,6 +69,37 @@ def get_shipping_tables(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/methods")
+def get_shipping_methods(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Get all shipping methods with full details matching old platform."""
+    try:
+        result = db.execute(text("""
+            SELECT id, method, admin_display, rate_tool, auto_id, code, visible, default_method
+            FROM shipping_methods
+            ORDER BY sort_order ASC, id ASC
+        """)).fetchall()
+
+        methods = [
+            {
+                "id": row.id,
+                "method": row.method,
+                "admin_display": row.admin_display or '',
+                "rate_tool": row.rate_tool or '',
+                "auto_id": row.auto_id or '',
+                "code": row.code or '',
+                "visible": row.visible or 'n',
+                "default_method": row.default_method or 'n',
+            }
+            for row in result
+        ]
+        return {"data": methods}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/tables/{table_id}")
 def get_shipping_table(
     table_id: int,
@@ -290,6 +321,71 @@ def update_shipping_options(
         db.commit()
 
         return {"message": "Shipping options updated successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/methods/update-visibility")
+def update_shipping_visibility(
+    updates: list,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Update visibility and default method for all shipping methods."""
+    try:
+        for update in updates:
+            db.execute(text("""
+                UPDATE shipping_methods
+                SET visible = :visible, default_method = :default
+                WHERE id = :id
+            """), {
+                "id": update['id'],
+                "visible": update.get('visible', 'n'),
+                "default": update.get('default_method', 'n'),
+            })
+        db.commit()
+
+        return {"message": "Shipping methods updated successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/methods/{method_id}/move-up")
+def move_shipping_method_up(
+    method_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Move a shipping method up in priority order."""
+    try:
+        # Get current sort order
+        current = db.execute(text(
+            "SELECT sort_order FROM shipping_methods WHERE id = :id"
+        ), {"id": method_id}).fetchone()
+
+        if not current or current.sort_order is None:
+            raise HTTPException(status_code=404, detail="Shipping method not found")
+
+        # Find the previous method
+        previous = db.execute(text("""
+            SELECT id, sort_order FROM shipping_methods
+            WHERE sort_order < :sort_order
+            ORDER BY sort_order DESC LIMIT 1
+        """), {"sort_order": current.sort_order}).fetchone()
+
+        if previous:
+            # Swap sort orders
+            db.execute(text("UPDATE shipping_methods SET sort_order = :new_order WHERE id = :id"),
+                      {"new_order": previous.sort_order, "id": method_id})
+            db.execute(text("UPDATE shipping_methods SET sort_order = :new_order WHERE id = :id"),
+                      {"new_order": current.sort_order, "id": previous.id})
+
+        db.commit()
+        return {"message": "Shipping method moved up successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

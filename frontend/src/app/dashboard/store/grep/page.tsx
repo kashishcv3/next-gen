@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import api from '@/lib/api';
+import { useStore } from '@/context/StoreContext';
 
 interface SearchResult {
   file: string;
@@ -10,8 +11,10 @@ interface SearchResult {
 }
 
 export default function StoreGrepPage() {
+  const { siteId } = useStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,8 +26,9 @@ export default function StoreGrepPage() {
     setError(null);
 
     try {
-      const res = await api.post('/store/grep', { search_term: searchTerm });
+      const res = await api.post(`/store-changelog/grep/${siteId}`, { search_term: searchTerm });
       setResults(res.data.data || []);
+      setTotalCount(res.data.count || 0);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Search failed');
     } finally {
@@ -45,7 +49,7 @@ export default function StoreGrepPage() {
       {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger">{error}</div></div></div>}
 
       <div className="row">
-        <div className="col-lg-8">
+        <div className="col-lg-12">
           <div className="panel panel-primary">
             <div className="panel-heading">
               <h3 className="panel-title"><i className="fa fa-search"></i> Search</h3>
@@ -70,7 +74,7 @@ export default function StoreGrepPage() {
           <div className="col-lg-12">
             <div className="panel panel-default">
               <div className="panel-heading">
-                <h3 className="panel-title">Search Results ({results.length})</h3>
+                <h3 className="panel-title">Search Results (showing {results.length} of {totalCount})</h3>
               </div>
               <div className="table-responsive">
                 <table className="table table-striped table-hover">

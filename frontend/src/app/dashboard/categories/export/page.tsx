@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Container, Row, Col, Button, Alert, Card, Form, Spinner } from 'react-bootstrap';
+import { Container, Row, Col, Button, Alert, Card, Form, Spinner } from '@/lib/react-bootstrap';
 import { useRouter } from 'next/navigation';
 
 export default function CategoryExportPage() {

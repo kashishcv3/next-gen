@@ -36,7 +36,7 @@ const exportOptions: ExportOption[] = [
 
 export default function OrderExportPage() {
   const searchParams = useSearchParams();
-  const siteId = searchParams.get('site_id') || '1';
+  // site_id is auto-injected by the API interceptor from StoreContext
 
   const [selectedFormat, setSelectedFormat] = useState('csv');
   const [startDate, setStartDate] = useState('');
@@ -57,7 +57,6 @@ export default function OrderExportPage() {
       setError(null);
 
       const params = new URLSearchParams();
-      params.append('site_id', siteId);
       params.append('format', selectedFormat);
       params.append('date_from', startDate);
       params.append('date_to', endDate);
