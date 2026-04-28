@@ -16,7 +16,7 @@ export default function CreditCardOptionsPage() {
       const res = await api.get('/payment/options/creditcards');
       setOptions(res.data.data || res.data || {});
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load options');
+      const d = err.response?.data?.detail; setError(typeof d === 'string' ? d : (Array.isArray(d) ? d.map((x: any) => x.msg).join(', ') : 'Failed to load options'));
     } finally {
       setLoading(false);
     }
@@ -33,7 +33,7 @@ export default function CreditCardOptionsPage() {
       await api.post('/payment/options/creditcards', options);
       setSuccess('Credit Card Options saved successfully');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to save');
+      const d = err.response?.data?.detail; setError(typeof d === 'string' ? d : (Array.isArray(d) ? d.map((x: any) => x.msg).join(', ') : 'Failed to save'));
     }
   };
 

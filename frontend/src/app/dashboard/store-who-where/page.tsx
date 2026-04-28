@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 
 interface Site {
   id: number;
@@ -23,10 +22,7 @@ export default function StoreWhoWherePage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/stores/who-where`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await api.get('/stores/who-where');
         setAllSites(response.data.sites);
         setFilteredSites(response.data.sites);
       } catch (err) {

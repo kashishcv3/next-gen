@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 
 interface Message {
   id: number;
@@ -23,10 +22,7 @@ export default function StoreLoginpagemessagesPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/stores/loginpagemessages`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await api.get('/stores/loginpagemessages');
         if (response.data.messages && response.data.messages.length > 0) {
           const msg = response.data.messages[0];
           setMessage(msg);
@@ -50,15 +46,11 @@ export default function StoreLoginpagemessagesPage() {
     setError(null);
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_BASE_URL}/stores/loginpagemessages`,
+      await api.post(
+        '/stores/loginpagemessages',
         {
           login_page_message: loginMessage,
           main_page_message: mainMessage,
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
         }
       );
       setSaveSuccess('Messages saved successfully');

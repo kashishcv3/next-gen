@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import axios from 'axios';
-import { API_BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 
 interface ChangeLog {
   id: number;
@@ -32,13 +31,7 @@ export default function StoreChangelogPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(
-          `${API_BASE_URL}/stores/changelog/${siteId}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
+        const response = await api.get(`/stores/changelog/${siteId}`);
         setStoreName(response.data.store_name);
         setChangelog(response.data.changelog);
 

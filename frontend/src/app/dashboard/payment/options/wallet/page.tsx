@@ -16,7 +16,7 @@ export default function WalletPaymentMethodsPage() {
       const res = await api.get('/payment/options/wallet');
       setOptions(res.data.data || res.data || {});
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load options');
+      const d = err.response?.data?.detail; setError(typeof d === 'string' ? d : (Array.isArray(d) ? d.map((x: any) => x.msg).join(', ') : 'Failed to load options'));
     } finally {
       setLoading(false);
     }
@@ -33,7 +33,7 @@ export default function WalletPaymentMethodsPage() {
       await api.post('/payment/options/wallet', options);
       setSuccess('Wallet & Payment Methods saved successfully');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to save');
+      const d = err.response?.data?.detail; setError(typeof d === 'string' ? d : (Array.isArray(d) ? d.map((x: any) => x.msg).join(', ') : 'Failed to save'));
     }
   };
 

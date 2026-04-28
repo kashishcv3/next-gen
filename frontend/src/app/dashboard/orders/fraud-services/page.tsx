@@ -8,15 +8,23 @@ export default function FraudServicesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [expandAll, setExpandAll] = useState(false);
+  const [openPanels, setOpenPanels] = useState<Record<string, boolean>>({});
 
   useEffect(() => { fetchOptions(); }, []);
 
   const fetchOptions = async () => {
     try {
       const res = await api.get('/orders/options/fraud');
-      setOptions(res.data.data || res.data || {});
+      const data = res.data.data || res.data || {};
+      setOptions(data);
+      // Auto-expand Sift Science panel if enabled
+      if (data.sift_science === 'y') {
+        setOpenPanels(prev => ({ ...prev, siftscience: true }));
+      }
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load options');
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'Failed to load fraud options');
     } finally {
       setLoading(false);
     }
@@ -33,36 +41,168 @@ export default function FraudServicesPage() {
       await api.post('/orders/options/fraud', options);
       setSuccess('Fraud Services saved successfully');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to save');
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'Failed to save');
     }
   };
 
-  if (loading) return <div className="container-fluid" style={{padding:'20px'}}><p><i className="fa fa-spinner fa-spin"></i> Loading...</p></div>;
+  const togglePanel = (id: string) => {
+    setOpenPanels(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleAll = () => {
+    const newState = !expandAll;
+    setExpandAll(newState);
+    setOpenPanels({ siftscience: newState });
+  };
+
+  const RadioYesNo = ({ name, value, onChange }: { name: string; value: string; onChange: (val: string) => void }) => (
+    <span>
+      <label className="radio-inline">
+        <input type="radio" name={name} value="y" checked={value === 'y'} onChange={() => onChange('y')} /> Yes
+      </label>
+      &nbsp;
+      <label className="radio-inline">
+        <input type="radio" name={name} value="n" checked={value !== 'y'} onChange={() => onChange('n')} /> No
+      </label>
+    </span>
+  );
+
+  if (loading) return <><h1>Fraud Services</h1><p><i className="fa fa-spinner fa-spin"></i> Loading...</p></>;
 
   return (
-    <div className="container-fluid" style={{padding:'20px'}}>
-      <div className="row"><div className="col-lg-12">
-        <h1>Fraud Services</h1>
-        <p><i className="fa fa-shield"></i> Configure fraud detection and prevention services for your orders</p>
-      </div></div>
-      {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger">{error}</div></div></div>}
-      {success && <div className="row"><div className="col-lg-12"><div className="alert alert-success">{success}</div></div></div>}
-      <form onSubmit={handleSubmit}>
-        <div className="row"><div className="col-lg-8">
-          <div className="well well-cv3-table">
-            {Object.entries(options).map(([key, value]) => (
-              <div key={key} className="form-group">
-                <label>{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</label>
-                <input type="text" className="form-control" value={value} onChange={(e) => handleChange(key, e.target.value)} />
+    <>
+      <div className="row">
+        <div className="col-lg-12">
+          <h1>Fraud Services</h1>
+        </div>
+      </div>
+      <br />
+      <div className="row">
+        <div className="col-lg-12">
+          <p>
+            <button type="button" className="btn btn-primary btn-sm" onClick={toggleAll}>
+              {expandAll ? 'Collapse All' : 'Expand All'}
+            </button>
+          </p>
+        </div>
+      </div>
+      <br />
+
+      {error && <div className="alert alert-danger">{error}</div>}
+      {success && <div className="alert alert-success">{success}</div>}
+
+      <form name="fraud_services" method="post" onSubmit={handleSubmit} role="form">
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="panel-group" id="accordian-gateways">
+
+              {/* Sift Science Panel */}
+              <div className="panel panel-primary">
+                <div className="panel-heading">
+                  <h3 className="panel-title">
+                    <a href="#" onClick={(e) => { e.preventDefault(); togglePanel('siftscience'); }} style={{ color: '#fff' }}>
+                      <i className={`fa fa-toggle-${openPanels.siftscience ? 'up' : 'down'}`}></i> Sift Science
+                    </a>
+                  </h3>
+                </div>
+                {openPanels.siftscience && (
+                  <div className="panel-body">
+                    <p>
+                      <span className="label label-warning">Note</span>{' '}
+                      Edit sift_science_to template tag if you wish to receive notifications for held orders
+                    </p>
+                    <div className="form-group">
+                      <label>Enable Sift Science</label>
+                      <br />
+                      <RadioYesNo
+                        name="sift_science"
+                        value={options.sift_science || 'n'}
+                        onChange={(val) => handleChange('sift_science', val)}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Sift Science Method</label>
+                      <br />
+                      <label className="radio-inline">
+                        <input type="radio" name="sift_version" value="203"
+                          checked={(options.sift_version || '203') === '203'}
+                          onChange={() => handleChange('sift_version', '203')} /> Actions
+                      </label>
+                      &nbsp;
+                      <label className="radio-inline">
+                        <input type="radio" name="sift_version" value="204"
+                          checked={options.sift_version === '204'}
+                          onChange={() => handleChange('sift_version', '204')} /> Workflows
+                      </label>
+                    </div>
+                    <div className="form-group">
+                      <label>Sift Science API Key</label>
+                      <input type="text" name="sift_science_apikey" className="form-control"
+                        value={options.sift_science_apikey || ''}
+                        onChange={(e) => handleChange('sift_science_apikey', e.target.value)} />
+                    </div>
+
+                    {/* Actions fields (version 203) */}
+                    {(options.sift_version || '203') === '203' && (
+                      <div id="sift_actions">
+                        <div className="form-group">
+                          <label>Sift Science Block ID</label>
+                          <input type="text" name="sift_science_blockid" className="form-control"
+                            value={options.sift_science_blockid || ''}
+                            onChange={(e) => handleChange('sift_science_blockid', e.target.value)} />
+                        </div>
+                        <div className="form-group">
+                          <label>Sift Science Allow ID</label>
+                          <input type="text" name="sift_science_allowid" className="form-control"
+                            value={options.sift_science_allowid || ''}
+                            onChange={(e) => handleChange('sift_science_allowid', e.target.value)} />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Workflows fields (version 204) */}
+                    {options.sift_version === '204' && (
+                      <div id="sift_workflows">
+                        <div className="form-group">
+                          <p className="help-block"><i className="fa fa-info-circle"></i>&nbsp;If the given abuse type is not used, leave the field blank</p>
+                        </div>
+                        <div className="form-group">
+                          <label>Sift Science Payment Abuse Accept ID</label>
+                          <input type="text" name="sift_payment_abuse_acceptid" className="form-control"
+                            value={options.sift_payment_abuse_acceptid || ''}
+                            onChange={(e) => handleChange('sift_payment_abuse_acceptid', e.target.value)} />
+                        </div>
+                        <div className="form-group">
+                          <label>Sift Science Content Abuse Accept ID</label>
+                          <input type="text" name="sift_content_abuse_acceptid" className="form-control"
+                            value={options.sift_content_abuse_acceptid || ''}
+                            onChange={(e) => handleChange('sift_content_abuse_acceptid', e.target.value)} />
+                        </div>
+                        <div className="form-group">
+                          <label>Sift Science Account Abuse Accept ID</label>
+                          <input type="text" name="sift_account_abuse_acceptid" className="form-control"
+                            value={options.sift_account_abuse_acceptid || ''}
+                            onChange={(e) => handleChange('sift_account_abuse_acceptid', e.target.value)} />
+                        </div>
+                        <div className="form-group">
+                          <label>Sift Science Promotion Abuse Accept ID</label>
+                          <input type="text" name="sift_promotion_abuse_acceptid" className="form-control"
+                            value={options.sift_promotion_abuse_acceptid || ''}
+                            onChange={(e) => handleChange('sift_promotion_abuse_acceptid', e.target.value)} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            ))}
-            {Object.keys(options).length === 0 && <p className="text-muted">No options loaded. The backend endpoint may need to be configured.</p>}
+
+            </div>
           </div>
-        </div></div>
-        <div className="row"><div className="col-lg-8">
-          <button type="submit" className="btn btn-primary"><i className="fa fa-save"></i> Save Options</button>
-        </div></div>
+        </div>
+        <br />
+        <input type="submit" value="Submit" name="submit" className="btn btn-primary" />
       </form>
-    </div>
+    </>
   );
 }

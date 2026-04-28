@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { useStore } from '@/context/StoreContext';
 import { useRouter, usePathname } from 'next/navigation';
-import Sidebar from './Sidebar';
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -76,7 +75,7 @@ export default function Header() {
             <span className="icon-bar"></span>
             <span className="icon-bar"></span>
           </button>
-          <Link className="navbar-brand" href={user?.uid ? `/dashboard/mainpage/${user.uid}` : '/dashboard'}>
+          <Link className="navbar-brand" href="/dashboard/master-list">
             <img src="/images/cv3_logo_white.png" alt="CV3" style={{ marginTop: '10px' }} />
           </Link>
         </div>
@@ -137,7 +136,7 @@ export default function Header() {
               <div className="col-lg-12">
                 <ul className="breadcrumb" style={!hasStoreContext ? { width: '100%' } : undefined}>
                   <span className="active">&gt;</span>
-                  <li><Link href="/dashboard">Main</Link></li>
+                  <li><Link href="/dashboard/master-list">Main</Link></li>
                   {isBigadminSection && (
                     <li className="active">{getBreadcrumbLabel()}</li>
                   )}
@@ -160,9 +159,6 @@ export default function Header() {
               </div>
             </div>
           )}
-
-          {/* Sidebar is inside the navbar collapse div, matching old platform header.tpl structure */}
-          {user && <Sidebar />}
 
         </div>{/* /.navbar-collapse */}
       </nav>

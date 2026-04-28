@@ -25,6 +25,8 @@ from app.routers import (
     store_changelog,
     store_settings,
     store_domain,
+    payment,
+    checkout,
 )
 
 app = FastAPI(
@@ -64,6 +66,8 @@ app.include_router(store_features.router, prefix=settings.API_PREFIX)
 app.include_router(store_changelog.router, prefix=settings.API_PREFIX)
 app.include_router(store_settings.router, prefix=settings.API_PREFIX)
 app.include_router(store_domain.router, prefix=settings.API_PREFIX)
+app.include_router(payment.router, prefix=settings.API_PREFIX)
+app.include_router(checkout.router, prefix=settings.API_PREFIX)
 
 
 @app.get("/")

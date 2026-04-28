@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 
 interface Store {
   id: number;
@@ -22,10 +21,7 @@ export default function StoreStoreoptionsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/stores/storeoptions`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await api.get('/stores/storeoptions');
         setAllStores(response.data.stores);
         setFilteredStores(response.data.stores);
       } catch (err) {

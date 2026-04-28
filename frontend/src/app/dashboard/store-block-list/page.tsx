@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 
 interface BlockItem {
   id: number;
@@ -27,10 +26,7 @@ export default function StoreBlockListPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/stores/block-list`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await api.get('/stores/block-list');
         setBlocks(response.data.blocks);
         setFilteredBlocks(response.data.blocks);
       } catch (err) {
@@ -64,16 +60,12 @@ export default function StoreBlockListPage() {
     setError(null);
 
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.post(
-        `${API_BASE_URL}/stores/block-list/add`,
+      const response = await api.post(
+        '/stores/block-list/add',
         {
           block_type: newBlockType,
           block_value: newBlockValue,
           reason: newBlockReason,
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
         }
       );
 

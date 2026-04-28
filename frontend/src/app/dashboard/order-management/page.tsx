@@ -16,7 +16,7 @@ export default function OrderManagementPage() {
       const res = await api.get('/orders/management');
       setOptions(res.data.data || res.data || {});
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load options');
+      const d = err.response?.data?.detail; setError(typeof d === 'string' ? d : (Array.isArray(d) ? d.map((x: any) => x.msg).join(', ') : 'Failed to load options'));
     } finally {
       setLoading(false);
     }
@@ -33,7 +33,7 @@ export default function OrderManagementPage() {
       await api.post('/orders/management', options);
       setSuccess('Order Management saved successfully');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to save');
+      const d = err.response?.data?.detail; setError(typeof d === 'string' ? d : (Array.isArray(d) ? d.map((x: any) => x.msg).join(', ') : 'Failed to save'));
     }
   };
 

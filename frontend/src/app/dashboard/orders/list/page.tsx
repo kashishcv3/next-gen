@@ -52,10 +52,13 @@ export default function OrderListPage() {
   const [totalResults, setTotalResults] = useState(0);
   const [expandedOrders, setExpandedOrders] = useState<Set<number>>(new Set());
 
-  const searchOptions = {
-    'order_id': 'Order ID',
-    'email': 'Email Address',
-    'last_name': 'Customer Name',
+  const searchOptions: Record<string, string> = {
+    '': 'Narrow Your Search',
+    'order_id': 'Order ID or Range',
+    'date_ordered': 'Date Ordered',
+    'last_name': "User's Last Name",
+    'email': "User's Email Address",
+    'gateway_order_id': 'Gateway Order ID',
   };
 
   const amazonPayStatusOptions = {
@@ -341,7 +344,7 @@ export default function OrderListPage() {
                       <React.Fragment key={order.id}>
                         <tr>
                           <td>
-                            <Link href={`/dashboard/orders/${order.order_id}`}>
+                            <Link href={`/dashboard/orders/detail/${order.order_id}`}>
                               {String(order.order_id).padStart(4, '0')}
                             </Link>
                           </td>

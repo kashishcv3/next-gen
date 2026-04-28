@@ -327,21 +327,24 @@ div#support-container li.support-faqs a i {
 }
 
 .side-nav {
-	position:static;
-	margin-left:-16px;
+	position:static !important;
+	margin-left:0;
 	overflow:visible;
 /*
 	background-color: #00b797;
 */
 	background-color: #4f8abe;
 	text-transform:uppercase;
-	left: 176px;
-	width: 176px;
-	height: 100%;
+	left: auto;
+	width: 200px;
+	min-width: 200px;
+	height: auto;
 	border-radius: 0;
 	border: none;
-    margin-bottom: 30px;
-/*	
+    margin-bottom: 0;
+	padding-left: 0;
+	list-style: none;
+/*
 	background-image: url(/images/page-wrapperbg.png);
 	background-repeat: repeat-y;
     background-position: right;
@@ -350,7 +353,7 @@ div#support-container li.support-faqs a i {
 
 .side-nav > li > a {
 	color:#fff;
-	width: 176px;
+	width: 200px;
 	font-size:12px;
 	font-weight:600;
 
@@ -428,8 +431,10 @@ div#wrapper {
 div#page-wrapper {
 	/*overflow:auto;*/
         min-height: 600px;
-	width:inherit;
-	margin-left:176px;
+	width: 100%;
+	flex: 1;
+	margin-left: 0;
+	padding: 10px 20px;
 }
 div#footer {
     top: 30px;

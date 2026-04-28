@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 
 interface Contract {
   id: number;
@@ -23,10 +22,7 @@ export default function StoreContractsPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/stores/contracts`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await api.get('/stores/contracts');
         setContracts(response.data.contracts);
       } catch (err) {
         setError('Failed to load contracts data');
@@ -53,24 +49,16 @@ export default function StoreContractsPage() {
     setUploadSuccess(null);
 
     try {
-      const token = localStorage.getItem('token');
       const uploadFormData = new FormData();
       uploadFormData.append('contract_file', file);
 
-      await axios.post(`${API_BASE_URL}/stores/contracts/upload`, uploadFormData, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      await api.post('/stores/contracts/upload', uploadFormData);
 
       setUploadSuccess('Contract uploaded successfully');
       e.currentTarget.reset();
 
       // Refresh contracts list
-      const response = await axios.get(`${API_BASE_URL}/stores/contracts`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await api.get('/stores/contracts');
       setContracts(response.data.contracts);
     } catch (err) {
       setUploadError('Failed to upload contract');

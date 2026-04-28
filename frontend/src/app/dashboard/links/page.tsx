@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 
 export default function InfoPage() {
+  const title = 'Links Management';
   return (
     <div className="container-fluid" style={{ padding: '20px'}}>
       <h1>Links Management</h1>

@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 
 interface Store {
   id: number;
@@ -27,10 +26,7 @@ export default function StoreMovePagePage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/stores/move-options`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await api.get('/stores/move-options');
         setStores(response.data.sites);
         setDevelopers(response.data.developers);
       } catch (err) {
@@ -51,17 +47,10 @@ export default function StoreMovePagePage() {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_BASE_URL}/stores/move`,
-        {
-          site_id: parseInt(selectedStore),
-          uid: parseInt(selectedDeveloper),
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      await api.post('/stores/move', {
+        site_id: parseInt(selectedStore),
+        uid: parseInt(selectedDeveloper),
+      });
       setSubmitMessage('Store moved successfully');
       setSelectedStore('');
       setSelectedDeveloper('');

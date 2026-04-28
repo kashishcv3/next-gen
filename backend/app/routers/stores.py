@@ -194,11 +194,19 @@ def get_benchmark_exclude(
     """Get benchmark excluded stores."""
 
     try:
-        stores_rows = db.execute(text(
-            "SELECT s.id, s.name, s.is_live, IFNULL(be.excluded, 'n') as excluded "
-            "FROM sites AS s LEFT JOIN benchmark_exclude AS be ON s.id = be.site_id "
-            "ORDER BY s.name"
-        )).fetchall()
+        # Try with benchmark_exclude join first
+        try:
+            stores_rows = db.execute(text(
+                "SELECT s.id, s.name, s.is_live, IFNULL(be.excluded, 'n') as excluded "
+                "FROM sites AS s LEFT JOIN benchmark_exclude AS be ON s.id = be.site_id "
+                "ORDER BY s.name"
+            )).fetchall()
+        except Exception:
+            # benchmark_exclude table may not exist - fall back to just sites
+            stores_rows = db.execute(text(
+                "SELECT s.id, s.name, s.is_live, 'n' as excluded "
+                "FROM sites AS s ORDER BY s.name"
+            )).fetchall()
 
         excluded = []
         included = []

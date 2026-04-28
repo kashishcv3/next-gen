@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import axios from 'axios';
-import { API_BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 
 interface Store {
   id: number;
@@ -21,10 +20,7 @@ export default function StoreBenchmarkExcludePage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(`${API_BASE_URL}/stores/benchmark-exclude`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await api.get('/stores/benchmark-exclude');
         setExcluded(response.data.excluded || []);
         setIncluded(response.data.included || []);
       } catch (err) {
@@ -80,14 +76,10 @@ export default function StoreBenchmarkExcludePage() {
     setError(null);
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_BASE_URL}/stores/benchmark-exclude/save`,
+      await api.post(
+        '/stores/benchmark-exclude/save',
         {
           excluded_ids: excluded.map((s) => s.id),
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
         }
       );
       setSubmitSuccess('Benchmark exclusion settings saved');

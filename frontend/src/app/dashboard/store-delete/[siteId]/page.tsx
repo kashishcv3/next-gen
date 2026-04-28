@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import axios from 'axios';
-import { API_BASE_URL } from '@/lib/api';
+import api from '@/lib/api';
 
 interface StoreInfo {
   id: number;
@@ -27,13 +26,7 @@ export default function StoreDeletePage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const token = localStorage.getItem('token');
-        const response = await axios.get(
-          `${API_BASE_URL}/stores/delete-info/${siteId}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
+        const response = await api.get(`/stores/delete-info/${siteId}`);
         setStore(response.data);
       } catch (err) {
         setError('Failed to load store information');
@@ -55,10 +48,7 @@ export default function StoreDeletePage() {
     setError(null);
 
     try {
-      const token = localStorage.getItem('token');
-      await axios.delete(`${API_BASE_URL}/stores/${siteId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await api.delete(`/stores/${siteId}`);
 
       // Redirect to store options after successful deletion
       router.push('/dashboard/store-storeoptions');
