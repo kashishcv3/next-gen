@@ -5,9 +5,9 @@ import api from '@/lib/api';
 
 interface Contract {
   id: number;
-  site_id: number;
   contract_file: string;
   created_at: string | null;
+  active: string;
 }
 
 export default function StoreContractsPage() {
@@ -39,7 +39,7 @@ export default function StoreContractsPage() {
     const formData = new FormData(e.currentTarget);
     const file = formData.get('contract_file') as File;
 
-    if (!file) {
+    if (!file || !file.name) {
       setUploadError('Please select a file');
       return;
     }
@@ -49,10 +49,9 @@ export default function StoreContractsPage() {
     setUploadSuccess(null);
 
     try {
-      const uploadFormData = new FormData();
-      uploadFormData.append('contract_file', file);
-
-      await api.post('/stores/contracts/upload', uploadFormData);
+      await api.post('/stores/contracts/upload', {
+        filename: file.name,
+      });
 
       setUploadSuccess('Contract uploaded successfully');
       e.currentTarget.reset();
@@ -133,9 +132,9 @@ export default function StoreContractsPage() {
           <thead>
             <tr>
               <th>ID</th>
-              <th>Site ID</th>
               <th>Contract File</th>
               <th>Created</th>
+              <th>Active</th>
             </tr>
           </thead>
           <tbody>
@@ -149,9 +148,9 @@ export default function StoreContractsPage() {
               contracts.map((contract) => (
                 <tr key={contract.id}>
                   <td>{contract.id}</td>
-                  <td>{contract.site_id}</td>
                   <td>{contract.contract_file}</td>
                   <td>{formatDate(contract.created_at)}</td>
+                  <td>{contract.active === 'y' ? 'Yes' : 'No'}</td>
                 </tr>
               ))
             )}

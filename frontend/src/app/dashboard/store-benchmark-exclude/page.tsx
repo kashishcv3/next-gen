@@ -79,7 +79,7 @@ export default function StoreBenchmarkExcludePage() {
       await api.post(
         '/stores/benchmark-exclude/save',
         {
-          excluded_ids: excluded.map((s) => s.id),
+          excluded_names: excluded.map((s) => s.name),
         }
       );
       setSubmitSuccess('Benchmark exclusion settings saved');

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-export default function CorePaymentOptionsPage() {
+export default function FulfillmentOptionsPage() {
   const [options, setOptions] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,11 +14,10 @@ export default function CorePaymentOptionsPage() {
 
   const fetchOptions = async () => {
     try {
-      const res = await api.get('/payment/options/core');
-      setOptions(res.data.data || res.data || {});
+      const res = await api.get('/fulfillment/options');
+      setOptions(res.data.data || {});
     } catch (err: any) {
-      const d = err.response?.data?.detail;
-      setError(typeof d === 'string' ? d : (Array.isArray(d) ? d.map((x: any) => x.msg).join(', ') : 'Failed to load options'));
+      setError(err.response?.data?.detail || 'Failed to load fulfillment options');
     } finally {
       setLoading(false);
     }
@@ -32,30 +31,37 @@ export default function CorePaymentOptionsPage() {
     e.preventDefault();
     setSuccess(null); setError(null); setSaving(true);
     try {
-      await api.post('/payment/options/core', options);
-      setSuccess('Core payment options saved successfully');
+      await api.post('/fulfillment/options', options);
+      setSuccess('Fulfillment options saved successfully');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
-      const d = err.response?.data?.detail;
-      setError(typeof d === 'string' ? d : (Array.isArray(d) ? d.map((x: any) => x.msg).join(', ') : 'Failed to save'));
+      setError(err.response?.data?.detail || 'Failed to save options');
     } finally {
       setSaving(false);
     }
   };
 
   const labelMap: Record<string, string> = {
-    payment_members_only: 'Members-Only Payment Methods',
-    payment_methods: 'Accepted Payment Methods',
-    paypal_redirect_to_ppx: 'PayPal Express Checkout Redirect',
+    fulfillment_enabled: 'Enable Fulfillment',
+    fulfillment_service: 'Fulfillment Service',
+    fulfillment_api_key: 'Fulfillment API Key',
+    fulfillment_warehouse: 'Warehouse / Location',
+    auto_fulfill: 'Auto-Fulfill Orders',
+    send_tracking: 'Send Tracking Info to Customers',
+    fulfillment_email_notify: 'Email Notification on Fulfillment',
   };
 
   const descriptionMap: Record<string, string> = {
-    payment_members_only: 'Only allow registered members to use payment methods other than credit card.',
-    payment_methods: 'Choose the payment methods you accept. Multiple methods can be comma-separated (e.g. "Credit Card,PayPal,Check").',
-    paypal_redirect_to_ppx: 'Redirect PayPal standard transactions to PayPal Express Checkout flow.',
+    fulfillment_enabled: 'Enable or disable the fulfillment integration.',
+    fulfillment_service: 'Select the fulfillment service provider.',
+    fulfillment_api_key: 'API key for the fulfillment service.',
+    fulfillment_warehouse: 'Warehouse or location code for fulfillment.',
+    auto_fulfill: 'Automatically fulfill orders when they are placed.',
+    send_tracking: 'Send tracking information to customers via email.',
+    fulfillment_email_notify: 'Send email notifications when items are fulfilled.',
   };
 
-  const yesNoFields = ['payment_members_only', 'paypal_redirect_to_ppx'];
+  const yesNoFields = ['fulfillment_enabled', 'auto_fulfill', 'send_tracking', 'fulfillment_email_notify'];
 
   const renderToggle = (key: string) => {
     const value = options[key] ?? '';
@@ -64,7 +70,7 @@ export default function CorePaymentOptionsPage() {
     const desc = descriptionMap[key];
 
     return (
-      <div key={key} style={{ marginBottom: '18px', padding: '12px', background: '#f9f9f9', borderRadius: '4px', border: '1px solid #eee' }}>
+      <div key={key} className="form-group" style={{ marginBottom: '18px', padding: '12px', background: '#f9f9f9', borderRadius: '4px', border: '1px solid #eee' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <label style={{ fontWeight: 600, marginBottom: '2px', display: 'block' }}>{label}</label>
@@ -94,7 +100,7 @@ export default function CorePaymentOptionsPage() {
     );
   };
 
-  const renderTextInput = (key: string) => {
+  const renderTextField = (key: string) => {
     const value = options[key] ?? '';
     const label = labelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
     const desc = descriptionMap[key];
@@ -112,20 +118,16 @@ export default function CorePaymentOptionsPage() {
 
   if (loading) return (
     <div className="container-fluid" style={{ padding: '20px' }}>
-      <p><i className="fa fa-spinner fa-spin"></i> Loading payment options...</p>
+      <p><i className="fa fa-spinner fa-spin"></i> Loading fulfillment options...</p>
     </div>
   );
-
-  // Separate toggle fields from text fields
-  const toggleKeys = Object.keys(options).filter(k => yesNoFields.includes(k));
-  const textKeys = Object.keys(options).filter(k => !yesNoFields.includes(k));
 
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
       <div className="row">
         <div className="col-lg-12">
-          <h1><i className="fa fa-credit-card" style={{ color: '#337ab7' }}></i> Core Payment Options</h1>
-          <p className="text-muted">Configure the core payment processing settings for this store.</p>
+          <h1><i className="fa fa-cube" style={{ color: '#337ab7' }}></i> Fulfillment Options</h1>
+          <p className="text-muted">Configure order fulfillment settings and integrations.</p>
         </div>
       </div>
 
@@ -135,42 +137,50 @@ export default function CorePaymentOptionsPage() {
       <form onSubmit={handleSubmit}>
         <div className="row">
           <div className="col-lg-9">
-            {/* Payment Methods Section */}
-            {textKeys.length > 0 && (
-              <div className="panel panel-default" style={{ marginBottom: '20px' }}>
-                <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: '2px solid #337ab7' }}>
-                  <h3 className="panel-title">
-                    <i className="fa fa-money" style={{ color: '#337ab7', marginRight: '8px' }}></i>
-                    Payment Methods
-                  </h3>
-                  <small className="text-muted">Configure which payment methods are accepted.</small>
-                </div>
-                <div className="panel-body">
-                  {textKeys.map(k => renderTextInput(k))}
-                </div>
+            <div className="panel panel-default" style={{ marginBottom: '20px' }}>
+              <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: '2px solid #337ab7' }}>
+                <h3 className="panel-title">
+                  <i className="fa fa-cog" style={{ color: '#337ab7', marginRight: '8px' }}></i>
+                  Fulfillment Settings
+                </h3>
+                <small className="text-muted">Enable and configure fulfillment for this store.</small>
               </div>
-            )}
-
-            {/* Toggle Settings Section */}
-            {toggleKeys.length > 0 && (
-              <div className="panel panel-default" style={{ marginBottom: '20px' }}>
-                <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: '2px solid #5cb85c' }}>
-                  <h3 className="panel-title">
-                    <i className="fa fa-toggle-on" style={{ color: '#5cb85c', marginRight: '8px' }}></i>
-                    Payment Settings
-                  </h3>
-                  <small className="text-muted">Enable or disable payment features.</small>
-                </div>
-                <div className="panel-body">
-                  {toggleKeys.map(k => renderToggle(k))}
-                </div>
+              <div className="panel-body">
+                {renderToggle('fulfillment_enabled')}
+                {renderTextField('fulfillment_service')}
+                {renderTextField('fulfillment_api_key')}
+                {renderTextField('fulfillment_warehouse')}
               </div>
-            )}
+            </div>
 
-            {Object.keys(options).length === 0 && (
-              <div className="panel panel-default">
+            <div className="panel panel-default" style={{ marginBottom: '20px' }}>
+              <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: '2px solid #5bc0de' }}>
+                <h3 className="panel-title">
+                  <i className="fa fa-envelope" style={{ color: '#5bc0de', marginRight: '8px' }}></i>
+                  Automation & Notifications
+                </h3>
+                <small className="text-muted">Configure automatic fulfillment and customer notifications.</small>
+              </div>
+              <div className="panel-body">
+                {renderToggle('auto_fulfill')}
+                {renderToggle('send_tracking')}
+                {renderToggle('fulfillment_email_notify')}
+              </div>
+            </div>
+
+            {/* Render any extra fields from the API not in our known lists */}
+            {Object.keys(options).filter(k => !Object.keys(labelMap).includes(k)).length > 0 && (
+              <div className="panel panel-default" style={{ marginBottom: '20px' }}>
+                <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: '2px solid #999' }}>
+                  <h3 className="panel-title">
+                    <i className="fa fa-cogs" style={{ color: '#999', marginRight: '8px' }}></i>
+                    Additional Settings
+                  </h3>
+                </div>
                 <div className="panel-body">
-                  <p className="text-muted text-center"><i className="fa fa-info-circle"></i> No core payment options found for this store.</p>
+                  {Object.keys(options).filter(k => !Object.keys(labelMap).includes(k)).map(k =>
+                    renderTextField(k)
+                  )}
                 </div>
               </div>
             )}
@@ -181,7 +191,7 @@ export default function CorePaymentOptionsPage() {
           <div className="col-lg-9">
             <div style={{ borderTop: '1px solid #eee', paddingTop: '15px' }}>
               <button type="submit" className="btn btn-primary btn-lg" disabled={saving}>
-                <i className={`fa ${saving ? 'fa-spinner fa-spin' : 'fa-save'}`}></i> {saving ? 'Saving...' : 'Save Payment Options'}
+                <i className={`fa ${saving ? 'fa-spinner fa-spin' : 'fa-save'}`}></i> {saving ? 'Saving...' : 'Save Fulfillment Options'}
               </button>
             </div>
           </div>

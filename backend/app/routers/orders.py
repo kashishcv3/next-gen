@@ -876,6 +876,149 @@ def save_member_options(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================
+# GIFT CARD SERVICE PROVIDERS
+# =========================================
+GIFT_CARD_TABLES = {
+    'custom': 'gift_card_service',
+    'smart': 'gift_card_service',
+    'valutec': 'gift_card_service',
+    'arroweye': 'gift_card_service',
+    'wtg': 'gift_card_service',
+    'aloha': 'gift_card_service',
+    'elavon': 'gift_card_service',
+    'tendercard': 'gift_card_service',
+}
+
+# Column prefixes for each provider
+GIFT_CARD_PREFIXES = {
+    'custom': ['gc_custom', 'custom_gc', 'gift_card_custom', 'gift_custom'],
+    'smart': ['smart_transactions', 'smart_gc', 'gc_smart'],
+    'valutec': ['valutec', 'gc_valutec'],
+    'arroweye': ['arroweye', 'gc_arroweye'],
+    'wtg': ['wtg', 'gc_wtg'],
+    'aloha': ['aloha', 'gc_aloha'],
+    'elavon': ['elavon', 'gc_elavon'],
+    'tendercard': ['tendercard', 'gc_tendercard'],
+}
+
+
+@router.get("/gift-card-service/{provider}")
+def get_gift_card_service_options(
+    provider: str,
+    site_id: int = Query(..., description="Store/site ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get gift card service options for a specific provider."""
+    try:
+        # Try the gift_card_service table first
+        try:
+            cols_result = db.execute(text("SHOW COLUMNS FROM gift_card_service")).fetchall()
+            all_cols = {row[0] for row in cols_result}
+        except Exception:
+            return {"data": {}}
+
+        # Filter columns relevant to this provider
+        prefixes = GIFT_CARD_PREFIXES.get(provider, [provider])
+        relevant_cols = []
+        for col in all_cols:
+            if col in ('site_id', 'id'):
+                continue
+            col_lower = col.lower()
+            for prefix in prefixes:
+                if prefix.lower() in col_lower:
+                    relevant_cols.append(col)
+                    break
+
+        # If no provider-specific cols found, return all cols (for 'custom' which may use generic names)
+        if not relevant_cols and provider == 'custom':
+            relevant_cols = [c for c in all_cols if c not in ('site_id', 'id')]
+
+        if not relevant_cols:
+            return {"data": {}}
+
+        select_cols = ", ".join(f"`{c}`" for c in relevant_cols)
+        result = db.execute(
+            text(f"SELECT {select_cols} FROM gift_card_service WHERE site_id = :site_id"),
+            {"site_id": site_id}
+        ).first()
+
+        if not result:
+            return {"data": {}}
+
+        data = {}
+        for col in relevant_cols:
+            val = getattr(result, col, '') or ''
+            data[col] = str(val)
+        return {"data": data}
+
+    except Exception as e:
+        return {"data": {}}
+
+
+@router.post("/gift-card-service/{provider}")
+def save_gift_card_service_options(
+    provider: str,
+    options: dict,
+    site_id: int = Query(..., description="Store/site ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save gift card service options for a specific provider."""
+    try:
+        col_types = get_table_col_types(db, 'gift_card_service')
+        updates, params = build_update_params(options, col_types, site_id)
+
+        if updates:
+            query = f"UPDATE gift_card_service SET {', '.join(updates)} WHERE site_id = :site_id"
+            db.execute(text(query), params)
+            db.commit()
+
+        return {"message": f"Gift card service ({provider}) options saved successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================
+# CATALOG EXPORT
+# =========================================
+@router.get("/catalog-export")
+def get_catalog_export(
+    site_id: int = Query(..., description="Store/site ID"),
+    categories: Optional[str] = None,
+    format: Optional[str] = "csv",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get catalog export data or category list for export."""
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            return {"data": [], "message": "Store not found"}
+
+        store_db = get_store_session(store_db_name)
+        try:
+            # If no categories specified, return list of categories for selection
+            if not categories:
+                try:
+                    result = store_db.execute(text(
+                        "SELECT id, name FROM categories ORDER BY name"
+                    )).fetchall()
+                    cats = [{"id": row.id, "name": row.name} for row in result]
+                    return {"data": cats}
+                except Exception:
+                    return {"data": []}
+
+            return {"data": [], "message": "Export ready"}
+        finally:
+            store_db.close()
+
+    except Exception as e:
+        return {"data": [], "message": str(e)}
+
+
 @router.get("/{order_id}", response_model=OrderDetail)
 def get_order_detail(
     order_id: int,

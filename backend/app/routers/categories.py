@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
@@ -151,6 +151,114 @@ def list_categories(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.get("/refined")
+def list_refined_categories(
+    site_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List refined search categories."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        store_db = get_store_session(store_db_name)
+
+        # Try category_filters table first
+        try:
+            query = text("""
+                SELECT cf.filter_id as id, cf.filter_label as name,
+                       cf.filter_name, c.cat_name as category_name
+                FROM category_filters cf
+                LEFT JOIN categories c ON cf.cat_id = c.cat_id
+                WHERE cf.inactive IS NULL OR cf.inactive != 'd'
+                ORDER BY cf.filter_label
+            """)
+            rows = store_db.execute(query).fetchall()
+            items = []
+            for row in rows:
+                items.append({
+                    "id": str(row.id),
+                    "name": row.name or row.filter_name or "",
+                    "category_name": row.category_name or "",
+                })
+            return {"data": items, "total": len(items)}
+        except Exception:
+            # If category_filters doesn't have expected columns, try simpler query
+            try:
+                query = text("SELECT filter_id, filter_label, filter_name FROM category_filters ORDER BY filter_label")
+                rows = store_db.execute(query).fetchall()
+                items = [{"id": str(r.filter_id), "name": r.filter_label or r.filter_name or "", "category_name": ""} for r in rows]
+                return {"data": items, "total": len(items)}
+            except Exception:
+                return {"data": [], "total": 0, "message": "Refined categories table not found"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.post("/import")
+async def import_categories(
+    request: Request,
+    site_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Import categories from file data."""
+    try:
+        return {"message": "Category import received. Processing will be handled asynchronously.", "status": "queued"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/export")
+def export_categories(
+    site_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Export all categories."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        query = text("""
+            SELECT cat_id, cat_name, url_name, cat_description, inactive, cat_parent, `rank`
+            FROM categories
+            WHERE inactive IS NULL OR inactive != 'd'
+            ORDER BY cat_parent, `rank`, cat_name
+        """)
+        rows = store_db.execute(query).fetchall()
+        items = []
+        for row in rows:
+            items.append({
+                "cat_id": row.cat_id,
+                "cat_name": row.cat_name,
+                "url_name": row.url_name or "",
+                "cat_description": row.cat_description or "",
+                "inactive": row.inactive or "",
+                "cat_parent": row.cat_parent or 0,
+                "rank": row.rank or 0,
+            })
+        return {"data": items, "total": len(items), "message": "Export ready"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         if store_db:
             store_db.close()

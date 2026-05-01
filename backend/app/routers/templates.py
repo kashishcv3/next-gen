@@ -716,6 +716,190 @@ def create_template(
             store_db.close()
 
 
+@router.get("/tags")
+def list_template_tags(
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List template tags and categories."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        tags = {}
+        try:
+            rows = store_db.execute(text(
+                "SELECT DISTINCT tag_name, tag_category FROM template_tags "
+                "WHERE inactive IS NULL OR inactive != 'd' ORDER BY tag_category, tag_name"
+            )).fetchall()
+            for r in rows:
+                category = r.tag_category or "General"
+                if category not in tags:
+                    tags[category] = []
+                tags[category].append({"name": r.tag_name, "category": r.tag_category})
+        except Exception:
+            pass
+
+        return {"tags": tags, "total": sum(len(v) for v in tags.values())}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.get("/forms")
+def list_template_forms(
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List template forms."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        forms = []
+        try:
+            rows = store_db.execute(text(
+                "SELECT id, name, form_type, description, last_modified FROM template_forms "
+                "WHERE inactive IS NULL OR inactive != 'd' ORDER BY form_type, name"
+            )).fetchall()
+            for r in rows:
+                forms.append({
+                    "id": r.id,
+                    "name": r.name,
+                    "form_type": r.form_type,
+                    "description": r.description,
+                    "last_modified": r.last_modified.isoformat() if r.last_modified else None,
+                })
+        except Exception:
+            pass
+
+        return {"forms": forms, "total": len(forms)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.delete("/forms/{form_id}")
+def delete_template_form(
+    form_id: int = Path(..., gt=0),
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a template form."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        try:
+            store_db.execute(text("UPDATE template_forms SET inactive = 'd' WHERE id = :id"), {"id": form_id})
+            store_db.commit()
+        except Exception:
+            store_db.execute(text("DELETE FROM template_forms WHERE id = :id"), {"id": form_id})
+            store_db.commit()
+
+        return {"message": "Form deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.post("/publish-all")
+def publish_all_templates(
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Publish all templates."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        try:
+            store_db.execute(text(
+                "UPDATE templates SET is_published = 1, has_changes = 0, last_modified = NOW() "
+                "WHERE inactive IS NULL OR inactive != 'd'"
+            ))
+            store_db.commit()
+        except Exception:
+            pass
+
+        return {"message": "All templates published successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.post("/{template_name}/publish")
+def publish_template(
+    template_name: str = Path(...),
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Publish a single template."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        try:
+            store_db.execute(text(
+                "UPDATE templates SET is_published = 1, has_changes = 0, last_modified = NOW() "
+                "WHERE name = :name"
+            ), {"name": template_name})
+            store_db.commit()
+        except Exception:
+            pass
+
+        return {"message": "Template published successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
 @router.delete("/{filename}")
 def delete_template(
     filename: str = Path(..., description="Template filename"),

@@ -27,6 +27,14 @@ from app.routers import (
     store_domain,
     payment,
     checkout,
+    fulfillment,
+    members,
+    au,
+    recipes,
+    vendors,
+    images,
+    files_mgmt,
+    store_content,
 )
 
 app = FastAPI(
@@ -68,6 +76,14 @@ app.include_router(store_settings.router, prefix=settings.API_PREFIX)
 app.include_router(store_domain.router, prefix=settings.API_PREFIX)
 app.include_router(payment.router, prefix=settings.API_PREFIX)
 app.include_router(checkout.router, prefix=settings.API_PREFIX)
+app.include_router(fulfillment.router, prefix=settings.API_PREFIX)
+app.include_router(members.router, prefix=settings.API_PREFIX)
+app.include_router(au.router, prefix=settings.API_PREFIX)
+app.include_router(recipes.router, prefix=settings.API_PREFIX)
+app.include_router(vendors.router, prefix=settings.API_PREFIX)
+app.include_router(images.router, prefix=settings.API_PREFIX)
+app.include_router(files_mgmt.router, prefix=settings.API_PREFIX)
+app.include_router(store_content.router, prefix=settings.API_PREFIX)
 
 
 @app.get("/")

@@ -183,14 +183,39 @@ def get_tax_options(
 ):
     """Get tax options."""
     try:
-        result = db.execute(text(
-            "SELECT option_key, option_value FROM tax_options ORDER BY option_key"
-        )).fetchall()
+        # First try key-value format
+        try:
+            result = db.execute(text(
+                "SELECT option_key, option_value FROM tax_options ORDER BY option_key"
+            )).fetchall()
+            options = {row.option_key: row.option_value for row in result}
+            return {"data": options}
+        except Exception:
+            pass
 
-        options = {row.option_key: row.option_value for row in result}
-        return {"data": options}
+        # Try reading as a single-row settings table
+        try:
+            cols_result = db.execute(text("SHOW COLUMNS FROM tax_options")).fetchall()
+            all_cols = [row[0] for row in cols_result]
+            # Skip id/site_id type columns
+            option_cols = [c for c in all_cols if c not in ('id', 'site_id')]
+            if not option_cols:
+                return {"data": {}}
+
+            select_cols = ", ".join(f'`{c}`' for c in option_cols)
+            result = db.execute(text(f"SELECT {select_cols} FROM tax_options LIMIT 1")).first()
+            if not result:
+                return {"data": {}}
+
+            options = {}
+            for col in option_cols:
+                val = getattr(result, col, '') or ''
+                options[col] = str(val)
+            return {"data": options}
+        except Exception:
+            return {"data": {}}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"data": {}}
 
 
 @router.post("/options")
@@ -233,6 +258,109 @@ def calculate_tax_rate(
 
         return {"rate": float(result.state_rate or 0), "location": location}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================
+# TAX RATE TOOL - CUSTOM & AVALARA
+# =========================================
+TAX_RATE_TOOL_PREFIXES = {
+    'custom': ['custom_tax', 'tax_custom', 'manual_tax'],
+    'avalara': ['avalara', 'tax_avalara', 'avatax'],
+}
+
+
+@router.get("/rate-tool/{provider}")
+def get_tax_rate_tool(
+    provider: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Get tax rate tool options for a specific provider (custom or avalara)."""
+    try:
+        # Try tax_options table first
+        try:
+            cols_result = db.execute(text("SHOW COLUMNS FROM tax_options")).fetchall()
+            all_cols = {row[0] for row in cols_result}
+        except Exception:
+            return {"data": {}}
+
+        prefixes = TAX_RATE_TOOL_PREFIXES.get(provider, [provider])
+        relevant_cols = []
+        for col in all_cols:
+            if col in ('site_id', 'id'):
+                continue
+            col_lower = col.lower()
+            for prefix in prefixes:
+                if prefix.lower() in col_lower:
+                    relevant_cols.append(col)
+                    break
+
+        # For custom, if no specific cols, return all cols from tax_options
+        if not relevant_cols and provider == 'custom':
+            relevant_cols = [c for c in all_cols if c not in ('site_id', 'id')]
+
+        if not relevant_cols:
+            return {"data": {}}
+
+        select_cols = ", ".join(f"`{c}`" for c in relevant_cols)
+        result = db.execute(
+            text(f"SELECT {select_cols} FROM tax_options LIMIT 1")
+        ).first()
+
+        if not result:
+            return {"data": {}}
+
+        data = {}
+        for col in relevant_cols:
+            val = getattr(result, col, '') or ''
+            data[col] = str(val)
+        return {"data": data}
+
+    except Exception as e:
+        return {"data": {}}
+
+
+@router.post("/rate-tool/{provider}")
+def save_tax_rate_tool(
+    provider: str,
+    options: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Save tax rate tool options for a specific provider."""
+    try:
+        try:
+            cols_result = db.execute(text("SHOW COLUMNS FROM tax_options")).fetchall()
+            col_types = {row[0]: str(row[1]).lower() for row in cols_result}
+        except Exception:
+            raise HTTPException(status_code=500, detail="tax_options table not found")
+
+        updates = []
+        params = {}
+        for key, value in options.items():
+            if key in ('site_id', 'id') or key not in col_types:
+                continue
+            updates.append(f"`{key}` = :{key}")
+            params[key] = value if value != '' else None
+
+        if updates:
+            # Try to find existing row
+            existing = db.execute(text("SELECT COUNT(*) as cnt FROM tax_options")).scalar()
+            if existing and existing > 0:
+                query = f"UPDATE tax_options SET {', '.join(updates)} LIMIT 1"
+            else:
+                cols = ", ".join(f"`{k}`" for k in params.keys())
+                vals = ", ".join(f":{k}" for k in params.keys())
+                query = f"INSERT INTO tax_options ({cols}) VALUES ({vals})"
+            db.execute(text(query), params)
+            db.commit()
+
+        return {"message": f"Tax rate tool ({provider}) options saved successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 

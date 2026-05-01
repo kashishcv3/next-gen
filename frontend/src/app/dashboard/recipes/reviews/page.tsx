@@ -25,7 +25,7 @@ export default function ListPage() {
       setLoading(true);
       const params = new URLSearchParams();
       if (searchTerm) params.append('search', searchTerm);
-      const response = await api.get(`/recipes?${params.toString()}`);
+      const response = await api.get(`/recipes/reviews?${params.toString()}`);
       setItems(response.data.data || []);
     } catch (err) {
       console.error('Error:', err);

@@ -261,6 +261,8 @@ def get_customer_groups(
         ]
         return {"data": groups}
     except Exception as e:
+        if "doesn't exist" in str(e) or "doesn\\'t exist" in str(e):
+            return {"data": []}
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -496,6 +498,96 @@ def delete_customer(
         db.commit()
 
         return {"message": "Customer deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("")
+def create_account(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Create a new developer/merchant account."""
+
+    first_name = data.get("first_name", "")
+    last_name = data.get("last_name", "")
+    co_name = data.get("co_name", "")
+    email = data.get("email", "")
+    phone = data.get("phone", "")
+    username = data.get("username", "")
+    password = data.get("password", "")
+    user_type = data.get("user_type", "merchant")
+
+    if not first_name or not last_name or not email or not username or not password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="first_name, last_name, email, username, and password are required"
+        )
+
+    try:
+        # Check if username already exists
+        existing = db.execute(text(
+            "SELECT uid FROM users WHERE username = :username"
+        ), {"username": username}).fetchone()
+
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Username '{username}' already exists"
+            )
+
+        # Check if email already exists
+        existing_email = db.execute(text(
+            "SELECT uid FROM users WHERE email = :email"
+        ), {"email": email}).fetchone()
+
+        if existing_email:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Email '{email}' already exists"
+            )
+
+        # Insert the new user
+        db.execute(text(
+            "INSERT INTO users (username, first_name, last_name, co_name, email, phone, "
+            "user_type, password, timestamp) "
+            "VALUES (:username, :first_name, :last_name, :co_name, :email, :phone, "
+            ":user_type, MD5(:password), NOW())"
+        ), {
+            "username": username,
+            "first_name": first_name,
+            "last_name": last_name,
+            "co_name": co_name,
+            "email": email,
+            "phone": phone,
+            "user_type": user_type,
+            "password": password,
+        })
+        db.commit()
+
+        # Get the new user's uid
+        new_user = db.execute(text(
+            "SELECT uid FROM users WHERE username = :username"
+        ), {"username": username}).fetchone()
+
+        # Also add to users_admins if it's a developer/admin type
+        if user_type in ("developer", "admin", "merchant"):
+            try:
+                db.execute(text(
+                    "INSERT INTO users_admins (uid) VALUES (:uid)"
+                ), {"uid": new_user.uid})
+                db.commit()
+            except Exception:
+                db.rollback()
+
+        return {
+            "message": f"Account '{username}' created successfully",
+            "uid": new_user.uid,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

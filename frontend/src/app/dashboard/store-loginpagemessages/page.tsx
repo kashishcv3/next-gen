@@ -23,12 +23,8 @@ export default function StoreLoginpagemessagesPage() {
     const fetchData = async () => {
       try {
         const response = await api.get('/stores/loginpagemessages');
-        if (response.data.messages && response.data.messages.length > 0) {
-          const msg = response.data.messages[0];
-          setMessage(msg);
-          setLoginMessage(msg.login_page_message);
-          setMainMessage(msg.main_page_message);
-        }
+        setLoginMessage(response.data.login_page_message || '');
+        setMainMessage(response.data.main_page_message || '');
       } catch (err) {
         setError('Failed to load login page messages');
       } finally {

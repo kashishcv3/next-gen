@@ -640,6 +640,184 @@ def get_inventory_notify_report(
             store_db.close()
 
 
+@router.get("/catalog-requests")
+def get_catalog_requests_report(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+    site_id: int = Query(...),
+    period: str = Query("month", regex="^(day|week|month|year|all)$"),
+):
+    """Get catalog request report."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        store_db = get_store_session(store_db_name)
+
+        # Check if catalog_requests table exists
+        try:
+            tables = store_db.execute(text("SHOW TABLES LIKE 'catalog_requests'")).fetchall()
+            if not tables:
+                # Table doesn't exist - return empty result
+                return {"data": {"records": [], "total": 0, "period": period}}
+        except Exception:
+            return {"data": {"records": [], "total": 0, "period": period}}
+
+        # Build date filter
+        now = datetime.now()
+        date_filter = ""
+        if period != "all":
+            if period == "day":
+                start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif period == "week":
+                start_date = now - timedelta(days=now.weekday())
+                start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif period == "month":
+                start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            else:  # year
+                start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            date_filter = f" WHERE request_date >= '{start_date.strftime('%Y-%m-%d %H:%M:%S')}'"
+
+        try:
+            result = store_db.execute(text(f"""
+                SELECT * FROM catalog_requests{date_filter}
+                ORDER BY request_date DESC
+                LIMIT 500
+            """)).fetchall()
+
+            records = []
+            for row in result:
+                record = {}
+                for key in row._mapping.keys():
+                    val = row._mapping[key]
+                    if hasattr(val, 'isoformat'):
+                        val = val.isoformat()
+                    record[key] = val
+                records.append(record)
+
+            return {"data": {"records": records, "total": len(records), "period": period}}
+        except Exception:
+            # Table might have different columns - return empty
+            return {"data": {"records": [], "total": 0, "period": period}}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching catalog requests: {str(e)}")
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.get("/wishlists")
+def get_wishlists_report(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+    site_id: int = Query(...),
+):
+    """Get customer wishlists report."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        store_db = get_store_session(store_db_name)
+
+        # Check if wishlists or wishlist table exists
+        try:
+            tables = store_db.execute(text("SHOW TABLES LIKE '%wish%'")).fetchall()
+            if not tables:
+                return {"data": [], "total": 0}
+        except Exception:
+            return {"data": [], "total": 0}
+
+        # Try different table name patterns
+        for table_name in ['wishlists', 'wishlist', 'wish_list']:
+            try:
+                # Get column info first
+                cols = store_db.execute(text(f"SHOW COLUMNS FROM {table_name}")).fetchall()
+                col_names = [c[0] for c in cols]
+
+                result = store_db.execute(text(f"SELECT * FROM {table_name} ORDER BY 1 DESC LIMIT 500")).fetchall()
+                records = []
+                for row in result:
+                    record = {}
+                    for key in row._mapping.keys():
+                        val = row._mapping[key]
+                        if hasattr(val, 'isoformat'):
+                            val = val.isoformat()
+                        record[key] = val
+                    records.append(record)
+
+                return {"data": records, "total": len(records)}
+            except Exception:
+                continue
+
+        return {"data": [], "total": 0}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching wishlists: {str(e)}")
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.get("/rewards")
+def get_rewards_report(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+    site_id: int = Query(...),
+):
+    """Get customer rewards report."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        store_db = get_store_session(store_db_name)
+
+        # Check if rewards table exists
+        try:
+            tables = store_db.execute(text("SHOW TABLES LIKE '%reward%'")).fetchall()
+            if not tables:
+                return {"data": [], "total": 0}
+        except Exception:
+            return {"data": [], "total": 0}
+
+        for table_name in ['customer_rewards', 'rewards', 'reward_points']:
+            try:
+                result = store_db.execute(text(f"SELECT * FROM {table_name} ORDER BY 1 DESC LIMIT 500")).fetchall()
+                records = []
+                for row in result:
+                    record = {}
+                    for key in row._mapping.keys():
+                        val = row._mapping[key]
+                        if hasattr(val, 'isoformat'):
+                            val = val.isoformat()
+                        record[key] = val
+                    records.append(record)
+
+                return {"data": records, "total": len(records)}
+            except Exception:
+                continue
+
+        return {"data": [], "total": 0}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching rewards: {str(e)}")
+    finally:
+        if store_db:
+            store_db.close()
+
+
 @router.get("/benchmark")
 def get_benchmark_report(
     db: Session = Depends(get_db),

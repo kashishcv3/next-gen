@@ -5,6 +5,7 @@ from app.database import get_db
 from app.models.user import User
 from app.dependencies import get_current_admin_user
 
+# Bigadmin store management endpoints
 router = APIRouter(prefix="/stores", tags=["stores"])
 
 
@@ -114,19 +115,19 @@ def get_contracts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Get store contracts."""
+    """Get store contracts from store_contracts table."""
 
     try:
         contracts_rows = db.execute(text(
-            "SELECT * FROM store_contracts ORDER BY id DESC"
+            "SELECT id, name, date_uploaded, active FROM store_contracts ORDER BY id DESC"
         )).fetchall()
 
         contracts = [
             {
                 "id": row.id,
-                "site_id": row.site_id,
-                "contract_file": row.contract_file or "",
-                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "contract_file": row.name or "",
+                "created_at": row.date_uploaded.isoformat() if row.date_uploaded else None,
+                "active": row.active or "n",
             }
             for row in contracts_rows
         ]
@@ -165,25 +166,23 @@ def get_loginpagemessages(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Get admin login page messages."""
+    """Get admin login page messages from login_messages table."""
 
     try:
-        messages_rows = db.execute(text(
-            "SELECT * FROM admin_messages ORDER BY id DESC"
-        )).fetchall()
+        store_row = db.execute(text(
+            "SELECT id, message FROM login_messages WHERE login = 'store'"
+        )).fetchone()
 
-        messages = []
-        for row in messages_rows:
-            messages.append({
-                "id": row.id,
-                "login_page_message": row.login_page_message or "",
-                "main_page_message": row.main_page_message or "",
-                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-            })
+        ecms_row = db.execute(text(
+            "SELECT id, message FROM login_messages WHERE login = 'ecms'"
+        )).fetchone()
 
-        return {"messages": messages}
+        return {
+            "login_page_message": store_row.message if store_row else "",
+            "main_page_message": ecms_row.message if ecms_row else "",
+        }
     except Exception:
-        return {"messages": []}
+        return {"login_page_message": "", "main_page_message": ""}
 
 
 @router.get("/benchmark-exclude")
@@ -191,22 +190,22 @@ def get_benchmark_exclude(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Get benchmark excluded stores."""
+    """Get benchmark excluded stores. Exclusions stored in admin_info table."""
 
     try:
-        # Try with benchmark_exclude join first
-        try:
-            stores_rows = db.execute(text(
-                "SELECT s.id, s.name, s.is_live, IFNULL(be.excluded, 'n') as excluded "
-                "FROM sites AS s LEFT JOIN benchmark_exclude AS be ON s.id = be.site_id "
-                "ORDER BY s.name"
-            )).fetchall()
-        except Exception:
-            # benchmark_exclude table may not exist - fall back to just sites
-            stores_rows = db.execute(text(
-                "SELECT s.id, s.name, s.is_live, 'n' as excluded "
-                "FROM sites AS s ORDER BY s.name"
-            )).fetchall()
+        # Get excluded store names from admin_info
+        exclude_row = db.execute(text(
+            "SELECT value FROM admin_info WHERE field = 'benchmark_exclude'"
+        )).fetchone()
+
+        excluded_names = set()
+        if exclude_row and exclude_row.value:
+            excluded_names = set(n.strip() for n in exclude_row.value.split(",") if n.strip())
+
+        # Get all live stores
+        stores_rows = db.execute(text(
+            "SELECT id, name, config_file FROM sites WHERE is_live = 'y' ORDER BY name"
+        )).fetchall()
 
         excluded = []
         included = []
@@ -215,10 +214,9 @@ def get_benchmark_exclude(
             store_data = {
                 "id": row.id,
                 "name": row.name,
-                "is_live": row.is_live or "n",
             }
-
-            if row.excluded == 'y':
+            # Match by config_file (folder name) as that's what old platform uses
+            if row.config_file in excluded_names or row.name in excluded_names:
                 excluded.append(store_data)
             else:
                 included.append(store_data)
@@ -237,16 +235,17 @@ def get_block_list(
 
     try:
         blocks_rows = db.execute(text(
-            "SELECT * FROM block_list ORDER BY id DESC"
+            "SELECT id, block, block_type, active, date_blocked, block_user, comments "
+            "FROM block_list WHERE active = 'y' ORDER BY id DESC"
         )).fetchall()
 
         blocks = [
             {
                 "id": row.id,
                 "block_type": row.block_type or "",
-                "block_value": row.block_value or "",
-                "reason": row.reason or "",
-                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "block_value": row.block or "",
+                "reason": row.comments or "",
+                "created_at": row.date_blocked.isoformat() if row.date_blocked else None,
             }
             for row in blocks_rows
         ]
@@ -551,3 +550,267 @@ def get_store_settings(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+
+
+@router.post("/move")
+def move_store(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Move a store to a different developer."""
+
+    site_id = data.get("site_id")
+    uid = data.get("uid")
+
+    if not site_id or not uid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="site_id and uid are required"
+        )
+
+    try:
+        # Verify site exists
+        site = db.execute(text(
+            "SELECT id, name FROM sites WHERE id = :site_id"
+        ), {"site_id": site_id}).fetchone()
+
+        if not site:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        # Verify target user exists
+        user = db.execute(text(
+            "SELECT uid, username FROM users WHERE uid = :uid"
+        ), {"uid": uid}).fetchone()
+
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Target user not found"
+            )
+
+        # Update users_sites to move the store to the new user
+        # First remove existing assignment
+        db.execute(text(
+            "DELETE FROM users_sites WHERE site_id = :site_id"
+        ), {"site_id": site_id})
+
+        # Then add new assignment
+        db.execute(text(
+            "INSERT INTO users_sites (uid, site_id) VALUES (:uid, :site_id)"
+        ), {"uid": uid, "site_id": site_id})
+
+        db.commit()
+
+        return {
+            "message": f"Store '{site.name}' moved to user '{user.username}' successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/loginpagemessages")
+def save_loginpagemessages(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Save admin login page messages to login_messages table."""
+
+    login_page_message = data.get("login_page_message", "")
+    main_page_message = data.get("main_page_message", "")
+
+    try:
+        # Update store login message
+        db.execute(text(
+            "UPDATE login_messages SET message = :msg WHERE login = 'store'"
+        ), {"msg": login_page_message})
+
+        # Update ecms (main admin page) message
+        db.execute(text(
+            "UPDATE login_messages SET message = :msg WHERE login = 'ecms'"
+        ), {"msg": main_page_message})
+
+        db.commit()
+        return {"message": "Messages saved successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/benchmark-exclude/save")
+def save_benchmark_exclude(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Save benchmark exclusion settings to admin_info table."""
+
+    excluded_names = data.get("excluded_names", [])
+
+    try:
+        # Join excluded store names as comma-separated string
+        value = ",".join(excluded_names)
+
+        # Update the admin_info row
+        db.execute(text(
+            "UPDATE admin_info SET value = :val WHERE field = 'benchmark_exclude'"
+        ), {"val": value})
+
+        db.commit()
+        return {"message": "Benchmark exclusion settings saved successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/block-list/add")
+def add_block(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Add a new block entry."""
+
+    block_type = data.get("block_type", "")
+    block_value = data.get("block_value", "")
+    reason = data.get("reason", "")
+
+    if not block_value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="block_value is required"
+        )
+
+    try:
+        db.execute(text(
+            "INSERT INTO block_list (block, block_type, active, date_blocked, block_user, comments) "
+            "VALUES (:block, :block_type, 'y', NOW(), :block_user, :comments)"
+        ), {
+            "block": block_value,
+            "block_type": block_type,
+            "block_user": current_user.username if hasattr(current_user, 'username') else "bigadmin",
+            "comments": reason,
+        })
+        db.commit()
+
+        # Get the inserted block
+        new_block = db.execute(text(
+            "SELECT id, block, block_type, date_blocked, comments FROM block_list ORDER BY id DESC LIMIT 1"
+        )).fetchone()
+
+        return {
+            "message": "Block added successfully",
+            "block": {
+                "id": new_block.id,
+                "block_type": new_block.block_type or "",
+                "block_value": new_block.block or "",
+                "reason": new_block.comments or "",
+                "created_at": new_block.date_blocked.isoformat() if new_block.date_blocked else None,
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/contracts/upload")
+def upload_contract(
+    data: dict = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Upload a contract file. Deactivates old contracts and inserts new one."""
+    import random
+
+    filename = ""
+    if data:
+        filename = data.get("filename", "")
+
+    if not filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No file provided"
+        )
+
+    try:
+        # Generate 4-digit random prefix like old platform
+        prefix = str(random.randint(1000, 9999))
+        stored_name = f"{prefix}|||{filename}"
+
+        # Deactivate all previous contracts
+        db.execute(text("UPDATE store_contracts SET active = 'n'"))
+
+        # Insert new active contract
+        db.execute(text(
+            "INSERT INTO store_contracts (name, date_uploaded, active) "
+            "VALUES (:name, NOW(), 'y')"
+        ), {"name": stored_name})
+
+        db.commit()
+
+        # Get the new contract
+        new_contract = db.execute(text(
+            "SELECT id, name, date_uploaded, active FROM store_contracts ORDER BY id DESC LIMIT 1"
+        )).fetchone()
+
+        return {
+            "message": "Contract uploaded successfully",
+            "contract": {
+                "id": new_contract.id,
+                "contract_file": new_contract.name,
+                "created_at": new_contract.date_uploaded.isoformat() if new_contract.date_uploaded else None,
+                "active": new_contract.active,
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{site_id}")
+def delete_store(
+    site_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Delete a store."""
+
+    try:
+        # Verify store exists
+        store = db.execute(text(
+            "SELECT id, name FROM sites WHERE id = :site_id"
+        ), {"site_id": site_id}).fetchone()
+
+        if not store:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Store not found"
+            )
+
+        store_name = store.name
+
+        # Remove from users_sites
+        db.execute(text(
+            "DELETE FROM users_sites WHERE site_id = :site_id"
+        ), {"site_id": site_id})
+
+        # Remove the site
+        db.execute(text(
+            "DELETE FROM sites WHERE id = :site_id"
+        ), {"site_id": site_id})
+
+        db.commit()
+
+        return {"message": f"Store '{store_name}' deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

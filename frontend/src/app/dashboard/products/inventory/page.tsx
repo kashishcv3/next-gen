@@ -73,7 +73,7 @@ export default function ProductInventoryPage() {
               onChange={(e) => {
                 setFilter(e.target.value);
                 fetchInventory();
-              }
+              }}
             >
               <option value="all">All Products</option>
               <option value="low">Low Stock</option>

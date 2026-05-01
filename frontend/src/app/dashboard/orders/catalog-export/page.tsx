@@ -18,8 +18,11 @@ export default function OrderCatalogExportPage() {
   const fetchCategories = async () => {
     try {
       setLoading(true);
-      const response = await api.get('/products/categories?include_products=1');
-      setCategories(response.data.data || []);
+      const response = await api.get('/categories/list');
+      const data = response.data;
+      // Categories come as data.categories array
+      const cats = data.categories || data.data || [];
+      setCategories(cats);
       setError(null);
     } catch (err) {
       console.error('Failed to fetch categories:', err);
@@ -43,7 +46,7 @@ export default function OrderCatalogExportPage() {
     if (selectedCategories.size === categories.length) {
       setSelectedCategories(new Set());
     } else {
-      setSelectedCategories(new Set(categories.map((c) => c.id)));
+      setSelectedCategories(new Set(categories.map((c) => String(c.cat_id || c.id))));
     }
   };
 
@@ -113,14 +116,14 @@ export default function OrderCatalogExportPage() {
 
                 <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
                   {categories.map((category) => (
-                    <div key={category.id} className="form-group" style={{ marginBottom: '10px' }}>
+                    <div key={category.cat_id || category.id} className="form-group" style={{ marginBottom: '10px' }}>
                       <label className="checkbox">
                         <input
                           type="checkbox"
-                          checked={selectedCategories.has(category.id)}
-                          onChange={() => toggleCategory(category.id)}
+                          checked={selectedCategories.has(String(category.cat_id || category.id))}
+                          onChange={() => toggleCategory(String(category.cat_id || category.id))}
                         />
-                        {category.name} ({category.product_count || 0} products)
+                        {category.cat_name || category.name} ({category.prod_count || category.product_count || 0} products)
                       </label>
                     </div>
                   ))}

@@ -230,7 +230,7 @@ def get_payment_gateway_options(
 
             if gw_select:
                 gw_result = db.execute(
-                    text(f"SELECT {', '.join(gw_select)} FROM payment_gateway WHERE site_id = :site_id"),
+                    text(f"SELECT {', '.join(f'`{c}`' for c in gw_select)} FROM payment_gateway WHERE site_id = :site_id"),
                     {"site_id": site_id}
                 ).first()
 

@@ -47,6 +47,73 @@ class WholesaleShipping(BaseModel):
         from_attributes = True
 
 
+# WHOLESALE APPROVAL
+@router.get("/approve")
+def get_pending_wholesale_members(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Get wholesale members pending approval."""
+    try:
+        result = db.execute(text(
+            "SELECT id, company_name, contact_email, contact_phone, status, created_at "
+            "FROM wholesale_members WHERE status = 'pending' OR status = 'new' "
+            "ORDER BY created_at DESC"
+        )).fetchall()
+
+        members = [
+            {
+                "id": row.id,
+                "company_name": row.company_name,
+                "contact_email": row.contact_email,
+                "contact_phone": row.contact_phone,
+                "status": row.status,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in result
+        ]
+        return {"data": members}
+    except Exception as e:
+        # Table might not exist
+        return {"data": []}
+
+
+@router.post("/approve/{member_id}")
+def approve_wholesale_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Approve a wholesale member."""
+    try:
+        db.execute(text(
+            "UPDATE wholesale_members SET status = 'active' WHERE id = :id"
+        ), {"id": member_id})
+        db.commit()
+        return {"message": "Wholesale member approved successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/reject/{member_id}")
+def reject_wholesale_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Reject a wholesale member."""
+    try:
+        db.execute(text(
+            "UPDATE wholesale_members SET status = 'rejected' WHERE id = :id"
+        ), {"id": member_id})
+        db.commit()
+        return {"message": "Wholesale member rejected"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # WHOLESALE MEMBERS
 @router.get("/members")
 def get_wholesale_members(
@@ -80,6 +147,8 @@ def get_wholesale_members(
         ]
         return {"data": members}
     except Exception as e:
+        if "doesn't exist" in str(e):
+            return {"data": []}
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -213,6 +282,8 @@ def get_wholesale_orders(
         ]
         return {"data": orders}
     except Exception as e:
+        if "doesn't exist" in str(e):
+            return {"data": []}
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -278,6 +349,8 @@ def get_wholesale_shipping(
         ]
         return {"data": shipping}
     except Exception as e:
+        if "doesn't exist" in str(e):
+            return {"data": []}
         raise HTTPException(status_code=500, detail=str(e))
 
 

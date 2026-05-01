@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional, List, Dict
-from app.database import get_db
+from app.database import get_db, get_store_db_name, get_store_session
 from app.models.user import User
-from app.dependencies import get_current_admin_user
+from app.dependencies import get_current_user, get_current_admin_user
 from datetime import datetime
 import os
 
@@ -204,6 +204,133 @@ def list_template_forms(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+
+
+@router.get("/config")
+def get_store_template_config(
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get store template configuration (store.conf settings)."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        store_db = get_store_session(store_db_name)
+
+        config = {}
+        # Try site_options table for template/store config settings
+        try:
+            cols = [r[0] for r in store_db.execute(text("SHOW COLUMNS FROM site_options")).fetchall()]
+            # Get config-related columns
+            config_cols = [c for c in cols if any(prefix in c.lower() for prefix in [
+                'template', 'store_', 'site_', 'display_', 'layout_', 'theme_',
+                'header_', 'footer_', 'nav_', 'logo_', 'color_', 'font_',
+                'css_', 'js_', 'meta_', 'seo_'
+            ])]
+            if config_cols:
+                col_str = ", ".join(config_cols)
+                row = store_db.execute(text(f"SELECT {col_str} FROM site_options LIMIT 1")).fetchone()
+                if row:
+                    for i, col in enumerate(config_cols):
+                        config[col] = str(row[i]) if row[i] is not None else ""
+        except Exception:
+            pass
+
+        # If no config found, try a store_config table
+        if not config:
+            try:
+                rows = store_db.execute(text(
+                    "SELECT config_key, config_value FROM store_config ORDER BY config_key"
+                )).fetchall()
+                for row in rows:
+                    config[row.config_key] = row.config_value or ""
+            except Exception:
+                pass
+
+        return {"config": config}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.put("/config")
+async def save_store_template_config(
+    request: Request,
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Save store template configuration."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        store_db = get_store_session(store_db_name)
+
+        body = await request.json()
+        config_data = body.get("config", body)
+
+        try:
+            cols = [r[0] for r in store_db.execute(text("SHOW COLUMNS FROM site_options")).fetchall()]
+            updates = []
+            params = {}
+            for key, value in config_data.items():
+                if key in cols:
+                    updates.append(f"{key} = :{key}")
+                    params[key] = value
+            if updates:
+                store_db.execute(text(f"UPDATE site_options SET {', '.join(updates)}"), params)
+                store_db.commit()
+        except Exception:
+            # Fallback: try store_config table
+            for key, value in config_data.items():
+                store_db.execute(text(
+                    "INSERT INTO store_config (config_key, config_value) "
+                    "VALUES (:key, :value) "
+                    "ON DUPLICATE KEY UPDATE config_value = :value"
+                ), {"key": key, "value": value})
+            store_db.commit()
+
+        return {"message": "Store configuration saved successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.post("/create", status_code=status.HTTP_201_CREATED)
+def create_template_via_create(
+    template_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Create a new template (alias for POST /)."""
+    try:
+        insert_query = text("""
+            INSERT INTO templates (name, template_type, content, date_created, last_modified)
+            VALUES (:name, :template_type, :content, NOW(), NOW())
+        """)
+        db.execute(insert_query, template_data)
+        db.commit()
+        return {"message": "Template created successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 @router.get("/{template_id}", response_model=TemplateDetail)
