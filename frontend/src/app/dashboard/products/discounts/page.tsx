@@ -120,16 +120,16 @@ export default function ProductDiscountListPage() {
                         <tr key={discount.id}>
                           <td>{discount.product_name}</td>
                           <td>
-                            {discount.discount_percentage > 0 ? (
+                            {Number(discount.discount_percentage) > 0 ? (
                               <span>{discount.discount_percentage}%</span>
                             ) : (
-                              <span>${discount.discount_amount}</span>
+                              <span>${discount.discount_amount || '0'}</span>
                             )}
                           </td>
                           <td>
-                            {discount.discount_percentage > 0
+                            {Number(discount.discount_percentage) > 0
                               ? `${discount.discount_percentage}% off`
-                              : `$${discount.discount_amount.toFixed(2)} off`}
+                              : `$${Number(discount.discount_amount || 0).toFixed(2)} off`}
                           </td>
                           <td>{discount.start_date}</td>
                           <td>{discount.end_date}</td>
