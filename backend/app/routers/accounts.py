@@ -135,18 +135,22 @@ def get_account_delete_info(
 
 @router.get("/preferences/{uid}")
 def get_account_preferences(
-    uid: int = Path(..., gt=0),
+    uid: int = Path(..., ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
     """
     Returns preferences and account info for a user including MFA settings.
+    If uid is 0, returns the current user's preferences.
     """
     try:
+        # If uid is 0, use current user's uid
+        actual_uid = current_user.uid if uid == 0 else uid
+
         # Get user preferences
         user_row = db.execute(text(
             "SELECT uid, username, first_name, last_name, email, phone FROM users WHERE uid = :uid"
-        ), {"uid": uid}).fetchone()
+        ), {"uid": actual_uid}).fetchone()
 
         if not user_row:
             raise HTTPException(

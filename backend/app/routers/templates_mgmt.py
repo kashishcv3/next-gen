@@ -41,67 +41,114 @@ class TemplateList(BaseModel):
 
 @router.get("/list", response_model=dict)
 def list_templates(
+    site_id: int = Query(..., description="Store ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
     sort_by: Optional[str] = Query("common", description="Sort by 'common' or 'file'"),
 ):
     """
     List templates by category with full details matching old platform.
-    Mirrors Template_listView functionality.
+    Queries store DB template_names table (old platform: Template_listView).
     """
+    store_db = None
     try:
-        # Get template categories
-        query = text("""
-            SELECT id, name, common_name, template_type, last_modified,
-                   locked_status, locked_by, is_published, has_changes
-            FROM templates
-            WHERE inactive IS NULL OR inactive != 'd'
-            ORDER BY template_type, name
-        """)
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
 
-        results = db.execute(query).fetchall()
+        store_db = get_store_session(store_db_name)
 
-        # Group by type
+        # Try template_names table first (old platform standard)
+        table_name = None
+        for tbl in ["template_names", "template_names_main", "templates"]:
+            try:
+                store_db.execute(text(f"SELECT 1 FROM {tbl} LIMIT 1"))
+                table_name = tbl
+                break
+            except Exception:
+                continue
+
+        if not table_name:
+            return {
+                "templates": {}, "stylesheets": {}, "javascript_files": {},
+                "other_files": {}, "html_categories": {},
+                "unpublished_cats": {}, "edit_locked": False, "total": 0,
+            }
+
+        # Discover columns
+        cols = [r[0] for r in store_db.execute(text(f"SHOW COLUMNS FROM {table_name}")).fetchall()]
+
+        # Build select with available columns
+        template_col = next((c for c in cols if c in ["template", "name", "filename"]), cols[0])
+        name_col = next((c for c in cols if c in ["template_name", "common_name", "display_name"]), None)
+        cat_col = next((c for c in cols if c in ["category", "template_type", "type"]), None)
+
+        select_parts = [template_col]
+        if name_col:
+            select_parts.append(name_col)
+        if cat_col:
+            select_parts.append(cat_col)
+        # Add other columns if available
+        for c in cols:
+            if c not in select_parts and c in ["last_modified", "date_modified", "locked_by", "inactive"]:
+                select_parts.append(c)
+
+        query = f"SELECT {', '.join(select_parts)} FROM {table_name}"
+        # Filter out deleted templates
+        if "inactive" in cols:
+            query += " WHERE inactive IS NULL OR inactive != 'd'"
+        if cat_col:
+            query += f" ORDER BY {cat_col}, {template_col}"
+        else:
+            query += f" ORDER BY {template_col}"
+
+        results = store_db.execute(text(query)).fetchall()
+
+        # Group by category
         template_list = {}
         stylesheets = {}
         javascript_files = {}
         other_files = {}
 
         for r in results:
-            template_type = r.template_type or "Other"
+            tpl_name = getattr(r, template_col, "") or ""
+            common = getattr(r, name_col, tpl_name) if name_col else tpl_name
+            category = getattr(r, cat_col, "Miscellaneous") if cat_col else "Miscellaneous"
+            category = category or "Miscellaneous"
+            last_mod = None
+            if "last_modified" in cols:
+                lm = getattr(r, "last_modified", None)
+                last_mod = str(lm) if lm else None
+            elif "date_modified" in cols:
+                lm = getattr(r, "date_modified", None)
+                last_mod = str(lm) if lm else None
 
             item = {
-                "id": r.id,
-                "name": r.name,
-                "file": r.name,
-                "common": r.common_name or r.name,
-                "template_type": r.template_type,
-                "last_modified": r.last_modified.isoformat() if r.last_modified else "N/A",
-                "locked": {
-                    "locked_status": r.locked_status or 'n',
-                    "locked_by": r.locked_by,
-                },
-                "changed": r.has_changes == 1 if r.has_changes else False,
+                "id": tpl_name,
+                "name": tpl_name,
+                "file": tpl_name,
+                "common": common or tpl_name,
+                "template_type": category,
+                "last_modified": last_mod or "N/A",
+                "locked": {"locked_status": "n", "locked_by": None},
+                "changed": False,
             }
 
-            if r.template_type == "CSS Stylesheets" or template_type.startswith("CSS"):
-                if "CSS Stylesheets" not in stylesheets:
-                    stylesheets["CSS Stylesheets"] = []
-                stylesheets["CSS Stylesheets"].append(item)
-            elif r.template_type == "JavaScript Files" or template_type.startswith("JavaScript"):
-                if "JavaScript Files" not in javascript_files:
-                    javascript_files["JavaScript Files"] = []
-                javascript_files["JavaScript Files"].append(item)
-            elif r.template_type == "Other Files" or template_type.startswith("Other"):
-                if "Other Files" not in other_files:
-                    other_files["Other Files"] = []
-                other_files["Other Files"].append(item)
-            else:
-                if template_type not in template_list:
-                    template_list[template_type] = []
-                template_list[template_type].append(item)
+            if "locked_by" in cols:
+                lb = getattr(r, "locked_by", None)
+                if lb:
+                    item["locked"] = {"locked_status": "y", "locked_by": lb}
 
-        # Create HTML categories for display
+            cat_lower = (category or "").lower()
+            if "css" in cat_lower or "stylesheet" in cat_lower:
+                stylesheets.setdefault("CSS Stylesheets", []).append(item)
+            elif "javascript" in cat_lower or "js" in cat_lower:
+                javascript_files.setdefault("JavaScript Files", []).append(item)
+            elif "other" in cat_lower:
+                other_files.setdefault("Other Files", []).append(item)
+            else:
+                template_list.setdefault(category, []).append(item)
+
         html_categories = {}
         for header in list(template_list.keys()) + list(stylesheets.keys()) + list(javascript_files.keys()) + list(other_files.keys()):
             html_categories[header] = '_'.join(header.lower().split())
@@ -117,11 +164,16 @@ def list_templates(
             "total": len(results),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database error: {str(e)}"
         )
+    finally:
+        if store_db:
+            store_db.close()
 
 
 @router.get("/tags", response_model=dict)

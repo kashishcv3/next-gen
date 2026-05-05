@@ -62,7 +62,7 @@ export default function CampaignListPage() {
   const formatDate = (dateString: string) => {
     try {
       return new Date(dateString).toLocaleDateString();
-    } catch {
+    } catch (e) {
       return dateString;
     }
   };
@@ -119,7 +119,7 @@ export default function CampaignListPage() {
                     setSearchTerm('');
                     setStatusFilter('all');
                     fetchCampaigns();
-                  }
+                  }}
                   style={{ marginLeft: '5px' }}
                 >
                   Clear

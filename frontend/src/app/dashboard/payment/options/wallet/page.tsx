@@ -9,6 +9,7 @@ export default function WalletPaymentMethodsPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
 
   useEffect(() => { fetchOptions(); }, []);
 
@@ -43,59 +44,47 @@ export default function WalletPaymentMethodsPage() {
     }
   };
 
-  const walletServices = [
-    {
-      enableKey: 'enable_google_pay',
-      configKey: 'google_pay_config',
-      name: 'Google Pay',
-      icon: 'fa-google',
-      color: '#4285F4',
-      description: 'Allow customers to pay using Google Pay.',
-    },
-    {
-      enableKey: 'enable_apple_pay',
-      configKey: 'apple_pay_config',
-      name: 'Apple Pay',
-      icon: 'fa-apple',
-      color: '#000',
-      description: 'Allow customers to pay using Apple Pay.',
-    },
-    {
-      enableKey: 'enable_venmo',
-      configKey: 'venmo_config',
-      name: 'Venmo',
-      icon: 'fa-money',
-      color: '#3D95CE',
-      description: 'Allow customers to pay using Venmo.',
-    },
-  ];
+  const handleUnlinkPaypal = async () => {
+    if (!confirm('Are you sure you want to unlink your PayPal account?')) return;
+    setUnlinking(true); setError(null);
+    try {
+      await api.post('/payment/options/wallet/unlink-paypal', {});
+      setSuccess('PayPal account unlinked successfully.');
+      setTimeout(() => setSuccess(null), 3000);
+      await fetchOptions();
+    } catch (err: any) {
+      setError('Error unlinking PayPal account.');
+    } finally {
+      setUnlinking(false);
+    }
+  };
 
-  const renderToggle = (key: string, isYes: boolean) => (
-    <div
-      onClick={() => handleChange(key, isYes ? 'n' : 'y')}
-      style={{
-        width: '52px', height: '28px', borderRadius: '14px', cursor: 'pointer',
-        background: isYes ? '#5cb85c' : '#ccc', position: 'relative', transition: 'background 0.2s',
-        flexShrink: 0,
-      }}
-    >
-      <div style={{
-        width: '22px', height: '22px', borderRadius: '50%', background: '#fff',
-        position: 'absolute', top: '3px', left: isYes ? '27px' : '3px',
-        transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-      }} />
-    </div>
-  );
+  const renderRadio = (name: string, label: string, value: string, radioOptions?: {value: string, label: string}[], helpText?: string) => {
+    const opts = radioOptions || [{ value: 'y', label: 'Yes' }, { value: 'n', label: 'No' }];
+    return (
+      <div className="form-group" style={{ marginBottom: '15px' }}>
+        <label style={{ fontWeight: 600, display: 'block', marginBottom: '4px' }}>{label}</label>
+        {opts.map(opt => (
+          <label key={opt.value} className="radio-inline" style={{ marginRight: '15px' }}>
+            <input type="radio" name={name} value={opt.value}
+              checked={value === opt.value}
+              onChange={() => handleChange(name, opt.value)} /> {opt.label}
+          </label>
+        ))}
+        {helpText && <p className="help-block"><small className="text-muted">{helpText}</small></p>}
+      </div>
+    );
+  };
+
+  const isPaypalConnected = !!(options['paypal_psp_settings_raw'] && options['paypal_psp_settings_raw'] !== '' && options['paypal_psp_settings_raw'] !== '{}');
+  const isGPayEnabled = (options['enable_google_pay'] || '').toLowerCase() === 'y';
+  const isApplePayEnabled = (options['enable_apple_pay'] || '').toLowerCase() === 'y';
 
   if (loading) return (
     <div className="container-fluid" style={{ padding: '20px' }}>
       <p><i className="fa fa-spinner fa-spin"></i> Loading wallet settings...</p>
     </div>
   );
-
-  // Collect any keys not handled by walletServices
-  const handledKeys = walletServices.flatMap(w => [w.enableKey, w.configKey]);
-  const otherKeys = Object.keys(options).filter(k => !handledKeys.includes(k));
 
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
@@ -110,99 +99,259 @@ export default function WalletPaymentMethodsPage() {
       {success && <div className="row"><div className="col-lg-12"><div className="alert alert-success"><i className="fa fa-check-circle"></i> {success}</div></div></div>}
 
       <form onSubmit={handleSubmit}>
+        {/* ============ PAYPAL PANEL ============ */}
         <div className="row">
-          <div className="col-lg-9">
-            {walletServices.map(wallet => {
-              const hasEnable = wallet.enableKey in options;
-              const hasConfig = wallet.configKey in options;
-              if (!hasEnable && !hasConfig) return null;
-
-              const enableVal = options[wallet.enableKey] ?? '';
-              const isEnabled = enableVal.toLowerCase() === 'y' || enableVal === '1' || enableVal.toLowerCase() === 'yes';
-
-              return (
-                <div key={wallet.name} className="panel panel-default" style={{ marginBottom: '20px' }}>
-                  <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: `2px solid ${isEnabled ? wallet.color : '#ccc'}` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <h3 className="panel-title" style={{ margin: 0 }}>
-                        <i className={`fa ${wallet.icon}`} style={{ color: wallet.color, marginRight: '8px' }}></i>
-                        {wallet.name}
-                      </h3>
-                      {hasEnable && renderToggle(wallet.enableKey, isEnabled)}
-                    </div>
-                    <small className="text-muted">{wallet.description}</small>
-                  </div>
-                  <div className="panel-body" style={{ opacity: isEnabled ? 1 : 0.5 }}>
-                    {hasEnable && (
-                      <div style={{ marginBottom: '12px' }}>
-                        <span className={`label label-${isEnabled ? 'success' : 'default'}`} style={{ fontSize: '12px' }}>
-                          <i className={`fa fa-${isEnabled ? 'check-circle' : 'times-circle'}`}></i> {isEnabled ? 'Enabled' : 'Disabled'}
-                        </span>
-                      </div>
-                    )}
-                    {hasConfig && (
-                      <div className="form-group" style={{ marginBottom: '0' }}>
-                        <label style={{ fontWeight: 600 }}>{wallet.name} Configuration</label>
-                        <div><small className="text-muted">JSON configuration or settings for {wallet.name} integration.</small></div>
-                        <textarea className="form-control" rows={3} value={options[wallet.configKey] || ''}
-                          onChange={(e) => handleChange(wallet.configKey, e.target.value)}
-                          style={{ maxWidth: '500px', marginTop: '4px', fontFamily: 'monospace', fontSize: '13px' }}
-                          placeholder={`{"merchantId": "...", "environment": "PRODUCTION"}`}
-                          disabled={!isEnabled} />
-                      </div>
-                    )}
-                    {!isEnabled && (
-                      <div className="alert alert-info" style={{ marginTop: '10px', marginBottom: '0' }}>
-                        <i className="fa fa-info-circle"></i> Enable {wallet.name} to configure its settings.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Other uncategorized fields */}
-            {otherKeys.length > 0 && (
-              <div className="panel panel-default" style={{ marginBottom: '20px' }}>
-                <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: '2px solid #5bc0de' }}>
+          <div className="col-lg-12">
+            <div className="panel-group" id="accordian-paypal">
+              <div className="panel panel-primary">
+                <div className="panel-heading">
                   <h3 className="panel-title">
-                    <i className="fa fa-cogs" style={{ color: '#5bc0de', marginRight: '8px' }}></i>
-                    Additional Settings
+                    <a data-toggle="collapse" href="#collapsePayPal">
+                      <i className="fa fa-toggle-down" style={{ marginRight: '6px' }}></i> PayPal
+                    </a>
                   </h3>
                 </div>
-                <div className="panel-body">
-                  {otherKeys.map(key => {
-                    const value = options[key] ?? '';
-                    return (
-                      <div key={key} className="form-group" style={{ marginBottom: '18px' }}>
-                        <label style={{ fontWeight: 600 }}>{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</label>
-                        <input type="text" className="form-control" value={value}
-                          onChange={(e) => handleChange(key, e.target.value)}
-                          style={{ maxWidth: '500px', marginTop: '4px' }} />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+                <div id="collapsePayPal" className="panel-collapse collapse in">
+                  <div className="panel-body">
+                    {renderRadio(
+                      'enable_paypal_integration',
+                      'Enable PayPal Integration',
+                      options['enable_paypal_integration'] || 'n'
+                    )}
+                    {renderRadio(
+                      'paypal_prod',
+                      'PayPal Environment',
+                      options['paypal_prod'] || 'n',
+                      [{ value: 'n', label: 'Sandbox' }, { value: 'y', label: 'Production' }],
+                      'Choose Sandbox for testing or Production for live payments.'
+                    )}
 
-            {Object.keys(options).length === 0 && (
-              <div className="panel panel-default">
-                <div className="panel-body">
-                  <p className="text-muted text-center"><i className="fa fa-info-circle"></i> No wallet payment options found for this store.</p>
+                    {isPaypalConnected ? (
+                      <>
+                        <div className="form-group">
+                          <label style={{ fontWeight: 600 }}>PayPal Account Status</label>
+                          <ul className="list-group" style={{ maxWidth: '600px' }}>
+                            <li className="list-group-item"><b>Tracking ID:</b> {options['paypal_tracking_id'] || ''}</li>
+                            <li className="list-group-item"><b>Merchant ID:</b> {options['paypal_paypal_merchant_id'] || ''}</li>
+                            <li className="list-group-item"><b>Product Intent ID:</b> {options['paypal_product_intent_id'] || ''}</li>
+                            <li className="list-group-item"><b>Email Confirmed:</b> {options['paypal_is_email_confirmed'] || ''}</li>
+                            <li className="list-group-item"><b>Account Status:</b> {options['paypal_account_status'] || ''}</li>
+                            <li className="list-group-item"><b>Permissions Granted:</b> {options['paypal_permissions_granted'] || ''}</li>
+                            <li className="list-group-item"><b>Consent Status:</b> {options['paypal_consent_status'] || ''}</li>
+                            <li className="list-group-item"><b>Risk Status:</b> {options['paypal_risk_status'] || ''}</li>
+                          </ul>
+                          <p className="help-block text-success"><i className="fa fa-check-circle"></i> PayPal account is connected.</p>
+                        </div>
+                        <div className="form-group">
+                          <button type="button" className="btn btn-danger" onClick={handleUnlinkPaypal} disabled={unlinking}>
+                            {unlinking ? <><i className="fa fa-spinner fa-spin"></i> Unlinking...</> : 'Unlink PayPal Account'}
+                          </button>
+                          <span className="help-block">Click to disconnect your PayPal account from this store.</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="form-group">
+                        <label style={{ fontWeight: 600 }}>PayPal Partner Connection</label>
+                        <p className="help-block">Click the button below to connect your PayPal account for seamless payment processing.</p>
+                        <button type="button" className="btn btn-primary"
+                          onClick={() => {
+                            const email = prompt('Enter your PayPal email:');
+                            if (!email) return;
+                            alert('PayPal partner referral flow requires server-side configuration. Please contact your administrator to set up PayPal API credentials.');
+                          }}>
+                          Connect PayPal
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
 
+        <br /><br />
+
+        {/* ============ GOOGLE PAY PANEL ============ */}
         <div className="row">
-          <div className="col-lg-9">
-            <div style={{ borderTop: '1px solid #eee', paddingTop: '15px' }}>
-              <button type="submit" className="btn btn-primary btn-lg" disabled={saving}>
-                <i className={`fa ${saving ? 'fa-spinner fa-spin' : 'fa-save'}`}></i> {saving ? 'Saving...' : 'Save Wallet Settings'}
-              </button>
+          <div className="col-lg-12">
+            <div className="panel-group" id="accordian-gpay">
+              <div className="panel panel-primary">
+                <div className="panel-heading">
+                  <h3 className="panel-title">
+                    <a data-toggle="collapse" href="#collapseGPay">
+                      <i className="fa fa-toggle-down" style={{ marginRight: '6px' }}></i> Google Pay
+                    </a>
+                  </h3>
+                </div>
+                <div id="collapseGPay" className="panel-collapse collapse in">
+                  <div className="panel-body">
+                    {renderRadio(
+                      'enable_google_pay',
+                      'Enable Google Pay',
+                      options['enable_google_pay'] || 'n'
+                    )}
+                  </div>
+                  {isGPayEnabled && (
+                    <div className="panel-body">
+                      <div className="form-group" style={{ marginBottom: '15px' }}>
+                        <label style={{ fontWeight: 600 }}>GPay Merchant Name</label>
+                        <input className="form-control" type="text"
+                          value={options['google_pay_merchant_name'] || ''}
+                          onChange={(e) => handleChange('google_pay_merchant_name', e.target.value)}
+                          style={{ maxWidth: '500px' }} />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: '15px' }}>
+                        <label style={{ fontWeight: 600 }}>GPay Merchant ID</label>
+                        <input className="form-control" type="text"
+                          value={options['google_pay_merchant_id'] || ''}
+                          onChange={(e) => handleChange('google_pay_merchant_id', e.target.value)}
+                          style={{ maxWidth: '500px' }} />
+                      </div>
+                      {[1, 2, 3, 4].map(i => (
+                        <React.Fragment key={i}>
+                          <div className="form-group" style={{ marginBottom: '15px' }}>
+                            <label style={{ fontWeight: 600 }}>Label for {i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : '4th'} Credential (Payment Processor)</label>
+                            <input className="form-control" type="text"
+                              value={options[`label_gpay_psp_credential_${i}`] || ''}
+                              onChange={(e) => handleChange(`label_gpay_psp_credential_${i}`, e.target.value)}
+                              placeholder={i === 1 ? 'eg. API Key' : i === 2 ? 'eg. Merchant ID' : i === 3 ? 'eg. Public Key' : 'eg. Private Key'}
+                              style={{ maxWidth: '500px' }} />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: '15px' }}>
+                            <label style={{ fontWeight: 600 }}>{i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : '4th'} Credential</label>
+                            <input className="form-control" type="text"
+                              value={options[`google_pay_credential_${i}`] || ''}
+                              onChange={(e) => handleChange(`google_pay_credential_${i}`, e.target.value)}
+                              style={{ maxWidth: '500px' }} />
+                          </div>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
+          </div>
+        </div>
+
+        <br /><br />
+
+        {/* ============ APPLE PAY PANEL ============ */}
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="panel-group" id="accordian-applepay">
+              <div className="panel panel-primary">
+                <div className="panel-heading">
+                  <h3 className="panel-title">
+                    <a data-toggle="collapse" href="#collapseApplePay">
+                      <i className="fa fa-toggle-down" style={{ marginRight: '6px' }}></i> Apple Pay
+                    </a>
+                  </h3>
+                </div>
+                <div id="collapseApplePay" className="panel-collapse collapse in">
+                  <div className="panel-body">
+                    {renderRadio(
+                      'enable_apple_pay',
+                      'Enable Apple Pay',
+                      options['enable_apple_pay'] || 'n'
+                    )}
+                  </div>
+                  {isApplePayEnabled && (
+                    <div className="panel-body">
+                      {/* File upload placeholders - display info about uploads */}
+                      <div className="form-group" style={{ marginBottom: '15px' }}>
+                        <label style={{ fontWeight: 600 }}>Apple Pay Domain Verification File</label>
+                        <div className="input-group" style={{ maxWidth: '500px' }}>
+                          <input className="form-control" type="file" accept=".txt" disabled
+                            title="File upload requires server-side handling" />
+                          <span className="input-group-addon" title="Upload the Apple Pay domain verification file provided by Apple.">
+                            <i className="fa fa-info-circle"></i>
+                          </span>
+                        </div>
+                        <p className="help-block"><small className="text-muted">File uploads are handled server-side. Contact admin to update certificate files.</small></p>
+                      </div>
+
+                      <div className="form-group" style={{ marginBottom: '15px' }}>
+                        <label style={{ fontWeight: 600 }}>Apple Merchant Certificate (.pem)</label>
+                        <div className="input-group" style={{ maxWidth: '500px' }}>
+                          <input className="form-control" type="file" accept=".pem" disabled
+                            title="File upload requires server-side handling" />
+                          <span className="input-group-addon" title="This certificate is used to identify your domain with Apple Pay.">
+                            <i className="fa fa-info-circle"></i>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="form-group" style={{ marginBottom: '15px' }}>
+                        <label style={{ fontWeight: 600 }}>Private Key File (.key)</label>
+                        <div className="input-group" style={{ maxWidth: '500px' }}>
+                          <input className="form-control" type="file" accept=".key" disabled
+                            title="File upload requires server-side handling" />
+                          <span className="input-group-addon" title="The private key must match the uploaded certificate.">
+                            <i className="fa fa-info-circle"></i>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="form-group" style={{ marginBottom: '15px' }}>
+                        <label style={{ fontWeight: 600 }}>Apple Pay Merchant Identifier</label>
+                        <input className="form-control" type="text"
+                          value={options['apple_pay_merchant_identifier'] || ''}
+                          onChange={(e) => handleChange('apple_pay_merchant_identifier', e.target.value)}
+                          style={{ maxWidth: '500px' }} />
+                      </div>
+
+                      <div className="form-group" style={{ marginBottom: '15px' }}>
+                        <label style={{ fontWeight: 600 }}>Apple Pay Merchant Verified Domain</label>
+                        <input className="form-control" type="text"
+                          value={options['apple_pay_merchant_verified_domain'] || ''}
+                          onChange={(e) => handleChange('apple_pay_merchant_verified_domain', e.target.value)}
+                          style={{ maxWidth: '500px' }} />
+                      </div>
+
+                      <div className="form-group" style={{ marginBottom: '15px' }}>
+                        <label style={{ fontWeight: 600 }}>Apple Pay Merchant Display Name</label>
+                        <input className="form-control" type="text"
+                          value={options['apple_pay_merchant_display_name'] || ''}
+                          onChange={(e) => handleChange('apple_pay_merchant_display_name', e.target.value)}
+                          style={{ maxWidth: '500px' }} />
+                      </div>
+
+                      {[1, 2, 3, 4].map(i => (
+                        <React.Fragment key={i}>
+                          <div className="form-group" style={{ marginBottom: '15px' }}>
+                            <label style={{ fontWeight: 600 }}>Label for {i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : '4th'} Credential (Payment Processor)</label>
+                            <input className="form-control" type="text"
+                              value={options[`label_apple_psp_credential_${i}`] || ''}
+                              onChange={(e) => handleChange(`label_apple_psp_credential_${i}`, e.target.value)}
+                              placeholder={i === 1 ? 'eg. API Key' : i === 2 ? 'eg. Merchant ID' : i === 3 ? 'eg. Public Key' : 'eg. Private Key'}
+                              style={{ maxWidth: '500px' }} />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: '15px' }}>
+                            <label style={{ fontWeight: 600 }}>{i === 1 ? '1st' : i === 2 ? '2nd' : i === 3 ? '3rd' : '4th'} Credential</label>
+                            <input className="form-control" type="text"
+                              value={options[`apple_pay_credential_${i}`] || ''}
+                              onChange={(e) => handleChange(`apple_pay_credential_${i}`, e.target.value)}
+                              style={{ maxWidth: '500px' }} />
+                          </div>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <br />
+        <div className="row">
+          <div className="col-lg-12">
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              <i className={`fa ${saving ? 'fa-spinner fa-spin' : 'fa-save'}`}></i>{' '}
+              {saving ? 'Saving...' : 'Submit'}
+            </button>
           </div>
         </div>
       </form>

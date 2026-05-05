@@ -1,161 +1,161 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-interface Store {
-  id: number;
-  name: string;
-  is_live: string;
-}
-
-export default function StoreBenchmarkExcludePage() {
-  const [excluded, setExcluded] = useState<Store[]>([]);
-  const [included, setIncluded] = useState<Store[]>([]);
+export default function BenchmarkExcludePage() {
+  const [excluded, setExcluded] = useState<string[]>([]);
+  const [available, setAvailable] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await api.get('/stores/benchmark-exclude');
-        setExcluded(response.data.excluded || []);
-        setIncluded(response.data.included || []);
-      } catch (err) {
-        setError('Failed to load benchmark exclude data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
   }, []);
 
-  const moveToExcluded = () => {
-    const selectedElements = document.querySelectorAll(
-      '#includedList option:checked'
-    ) as NodeListOf<HTMLOptionElement>;
-    const movedStores: Store[] = [];
-
-    selectedElements.forEach((option) => {
-      const storeId = parseInt(option.value);
-      const store = included.find((s) => s.id === storeId);
-      if (store) {
-        movedStores.push(store);
-      }
-    });
-
-    setIncluded(included.filter((s) => !movedStores.some((m) => m.id === s.id)));
-    setExcluded([...excluded, ...movedStores].sort((a, b) => a.name.localeCompare(b.name)));
+  const normalizeStores = (arr: any[]): string[] => {
+    if (!arr || arr.length === 0) return [];
+    return arr.map((item: any) => (typeof item === 'string' ? item : item.name || item.store || String(item)));
   };
 
-  const moveToIncluded = () => {
-    const selectedElements = document.querySelectorAll(
-      '#excludedList option:checked'
-    ) as NodeListOf<HTMLOptionElement>;
-    const movedStores: Store[] = [];
+  const fetchData = async () => {
+    try {
+      const res = await api.get('/stores/benchmark-exclude');
+      setExcluded(normalizeStores(res.data.excluded || []));
+      setAvailable(normalizeStores(res.data.included || []));
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    selectedElements.forEach((option) => {
-      const storeId = parseInt(option.value);
-      const store = excluded.find((s) => s.id === storeId);
-      if (store) {
-        movedStores.push(store);
-      }
-    });
+  const moveToExcluded = () => {
+    const select = document.getElementById('nosel') as HTMLSelectElement;
+    const selected = Array.from(select.selectedOptions).map((o) => o.value);
+    if (selected.length === 0) return;
 
-    setExcluded(excluded.filter((s) => !movedStores.some((m) => m.id === s.id)));
-    setIncluded([...included, ...movedStores].sort((a, b) => a.name.localeCompare(b.name)));
+    setAvailable(available.filter((s) => !selected.includes(s)));
+    setExcluded([...excluded, ...selected].sort());
+  };
+
+  const moveToAvailable = () => {
+    const select = document.getElementById('sel') as HTMLSelectElement;
+    const selected = Array.from(select.selectedOptions).map((o) => o.value);
+    if (selected.length === 0) return;
+
+    setExcluded(excluded.filter((s) => !selected.includes(s)));
+    setAvailable([...available, ...selected].sort());
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitting(true);
-    setSubmitSuccess(null);
+    setSuccess(null);
     setError(null);
-
     try {
-      await api.post(
-        '/stores/benchmark-exclude/save',
-        {
-          excluded_names: excluded.map((s) => s.name),
-        }
-      );
-      setSubmitSuccess('Benchmark exclusion settings saved');
-    } catch (err) {
-      setError('Failed to save benchmark exclusion settings');
-    } finally {
-      setSubmitting(false);
+      await api.post('/stores/benchmark-exclude/save', {
+        excluded_names: excluded,
+      });
+      setSuccess('Benchmark exclusion settings saved successfully');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to save');
     }
   };
 
-  if (loading) return <div className="container"><p>Loading...</p></div>;
+  if (loading) {
+    return (
+      <div className="container-fluid" style={{ padding: '20px' }}>
+        <p><i className="fa fa-spinner fa-spin"></i> Loading...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="container" style={{ marginTop: '20px' }}>
-      <h1>Benchmark Exclusion</h1>
+    <div className="container-fluid" style={{ padding: '20px' }}>
+      <div className="row">
+        <div className="col-lg-12">
+          <h1>Benchmark Exclude</h1>
+          <p>
+            <i className="fa fa-info-circle"></i> Select live stores that you wish to exclude from the benchmark averages.
+          </p>
+        </div>
+      </div>
 
-      {error && <div className="alert alert-danger">{error}</div>}
-      {submitSuccess && <div className="alert alert-success">{submitSuccess}</div>}
-
-      <form onSubmit={handleSubmit}>
-        <div className="row" style={{ marginBottom: '20px' }}>
-          <div className="col-md-5">
-            <h4>Included Stores</h4>
-            <select
-              id="includedList"
-              multiple
-              className="form-control"
-              style={{ height: '250px' }}
-            >
-              {included.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="col-md-2" style={{ textAlign: 'center', paddingTop: '100px' }}>
-            <button
-              type="button"
-              className="btn btn-default btn-block"
-              onClick={moveToExcluded}
-              style={{ marginBottom: '10px' }}
-            >
-              &gt;&gt;
-            </button>
-            <button
-              type="button"
-              className="btn btn-default btn-block"
-              onClick={moveToIncluded}
-            >
-              &lt;&lt;
-            </button>
-          </div>
-
-          <div className="col-md-5">
-            <h4>Excluded Stores</h4>
-            <select
-              id="excludedList"
-              multiple
-              className="form-control"
-              style={{ height: '250px' }}
-            >
-              {excluded.map((store) => (
-                <option key={store.id} value={store.id}>
-                  {store.name}
-                </option>
-              ))}
-            </select>
+      {error && (
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="alert alert-danger">{error}</div>
           </div>
         </div>
+      )}
 
+      {success && (
         <div className="row">
-          <div className="col-md-12">
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Saving...' : 'Save Exclusions'}
+          <div className="col-lg-12">
+            <div className="alert alert-success">{success}</div>
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit}>
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="panel panel-primary">
+              <div className="panel-heading">
+                <h3 className="panel-title"><i className="fa fa-cogs"></i> Benchmark Exclude</h3>
+              </div>
+              <div className="panel-body">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div>
+                    <label>Excluded Stores</label>
+                    <select
+                      id="sel"
+                      multiple
+                      size={10}
+                      className="form-control"
+                      style={{ width: '300px' }}
+                    >
+                      {excluded.map((store) => (
+                        <option key={store} value={store}>{store}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={moveToExcluded}
+                    >
+                      &lt;&lt;
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={moveToAvailable}
+                    >
+                      &gt;&gt;
+                    </button>
+                  </div>
+                  <div>
+                    <label>Available Stores</label>
+                    <select
+                      id="nosel"
+                      multiple
+                      size={10}
+                      className="form-control"
+                      style={{ width: '300px' }}
+                    >
+                      {available.map((store) => (
+                        <option key={store} value={store}>{store}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button type="submit" className="btn btn-primary">
+              <i className="fa fa-check"></i> Submit
             </button>
           </div>
         </div>

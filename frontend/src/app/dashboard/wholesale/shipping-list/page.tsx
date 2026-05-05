@@ -3,17 +3,14 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-interface ShippingEntry {
+interface WsShipper {
   id: number;
-  member_id: number;
-  member_name: string;
-  shipping_method: string;
-  cost: number;
-  created_at: string | null;
+  method: string;
+  code: string;
 }
 
-export default function WholesaleShippingPage() {
-  const [shipping, setShipping] = useState<ShippingEntry[]>([]);
+export default function WholesaleShippingListPage() {
+  const [shipping, setShipping] = useState<WsShipper[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,6 +18,7 @@ export default function WholesaleShippingPage() {
 
   const fetchData = async () => {
     try {
+      setLoading(true);
       const res = await api.get('/wholesale/shipping');
       setShipping(res.data.data || []);
     } catch (err: any) {
@@ -30,85 +28,71 @@ export default function WholesaleShippingPage() {
     }
   };
 
+  const handleDelete = async (id: number) => {
+    if (!window.confirm('Are you sure you want to delete this shipper?')) return;
+    try {
+      await api.delete(`/wholesale/shipping/${id}`);
+      fetchData();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to delete shipper');
+    }
+  };
+
   return (
-    <div className="container-fluid" style={{ padding: '20px' }}>
-      <div className="row">
-        <div className="col-lg-12">
-          <h1><i className="fa fa-truck" style={{ color: '#337ab7' }}></i> Wholesale Shipping</h1>
-          <p className="text-muted">Manage wholesale shipping methods and rates for wholesale members.</p>
-        </div>
-      </div>
+    <div className="container-fluid" style={{padding:'20px'}}>
+      <div className="row"><div className="col-lg-12">
+        <h1>Wholesale Shipping Options</h1>
+        <p><i className="fa fa-info-circle"></i> Use this page to manage the shipping options available to your wholesale customers.</p>
+      </div></div>
+      <br />
 
-      {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger"><i className="fa fa-exclamation-circle"></i> {error}</div></div></div>}
+      <p>
+        <a className="btn btn-primary btn-sm" href="/dashboard/wholesale/shipping/add">
+          <i className="fa fa-plus"></i> Add Shipper
+        </a>
+      </p>
+      <br />
 
-      <div className="row" style={{ marginBottom: '15px' }}>
-        <div className="col-lg-12">
-          <span className="label label-info" style={{ fontSize: '14px', padding: '6px 12px' }}>
-            <i className="fa fa-truck"></i> Shipping Methods: {shipping.length}
-          </span>
-          <button className="btn btn-default btn-sm" onClick={fetchData} style={{ marginLeft: '10px' }}>
-            <i className="fa fa-refresh"></i> Refresh
-          </button>
-        </div>
-      </div>
+      {error && <div className="alert alert-danger">{error}</div>}
 
-      {loading ? (
-        <div className="text-center" style={{ padding: '40px' }}>
-          <i className="fa fa-spinner fa-spin fa-2x"></i>
-          <p style={{ marginTop: '10px' }}>Loading wholesale shipping...</p>
-        </div>
-      ) : (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="panel panel-default">
-              <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: '2px solid #337ab7' }}>
-                <h3 className="panel-title">
-                  <i className="fa fa-ship" style={{ color: '#337ab7', marginRight: '8px' }}></i>
-                  Wholesale Shipping Methods
-                </h3>
-              </div>
-              <div className="panel-body" style={{ padding: 0 }}>
-                <div className="table-responsive">
-                  <table className="table table-hover table-striped" style={{ marginBottom: 0 }}>
-                    <thead>
-                      <tr style={{ background: '#f9f9f9' }}>
-                        <th style={{ fontWeight: 600 }}>ID</th>
-                        <th style={{ fontWeight: 600 }}>Company</th>
-                        <th style={{ fontWeight: 600 }}>Shipping Method</th>
-                        <th style={{ fontWeight: 600 }}>Cost</th>
-                        <th style={{ fontWeight: 600 }}>Created</th>
-                        <th style={{ fontWeight: 600 }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {shipping.length > 0 ? shipping.map(entry => (
-                        <tr key={entry.id}>
-                          <td><span className="label label-default">{entry.id}</span></td>
-                          <td style={{ fontWeight: 600 }}>{entry.member_name || `Member #${entry.member_id}`}</td>
-                          <td>{entry.shipping_method}</td>
-                          <td>${entry.cost.toFixed(2)}</td>
-                          <td>{entry.created_at ? new Date(entry.created_at).toLocaleDateString() : '—'}</td>
-                          <td>
-                            <a href={`/dashboard/wholesale/shipping/edit/${entry.id}`} className="btn btn-xs btn-info">
-                              <i className="fa fa-pencil"></i> Edit
-                            </a>
-                          </td>
-                        </tr>
-                      )) : (
-                        <tr>
-                          <td colSpan={6} className="text-center" style={{ padding: '30px', color: '#999' }}>
-                            <i className="fa fa-inbox fa-2x" style={{ display: 'block', marginBottom: '10px' }}></i>
-                            No wholesale shipping methods found.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+      {loading && <p><i className="fa fa-spinner fa-spin"></i> Loading...</p>}
+
+      {!loading && (
+        <div className="row"><div className="col-lg-12">
+          <div className="well" style={{background:'none'}}>
+            <div className="table-responsive">
+              <table className="table table-hover table-striped cv3-data-table">
+                <thead>
+                  <tr>
+                    <th className="text-left"><b>Shipper</b></th>
+                    <th className="text-center"><b>Import Code</b></th>
+                    <th className="text-center"><b>Delete</b></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shipping.length > 0 ? shipping.map((shipper) => (
+                    <tr key={shipper.id}>
+                      <td>
+                        <a href={`/dashboard/wholesale/shipping/edit/${shipper.id}`}>
+                          {shipper.method}
+                        </a>
+                      </td>
+                      <td className="text-center">{shipper.code}</td>
+                      <td className="text-center">
+                        <a href="#" onClick={(e) => { e.preventDefault(); handleDelete(shipper.id); }}
+                          title="Delete Shipper" data-toggle="tooltip">
+                          <i className="fa fa-times" style={{color:'red'}}></i>
+                        </a>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan={3} className="text-center">No wholesale shippers found</td></tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
-        </div>
+        </div></div>
       )}
     </div>
   );

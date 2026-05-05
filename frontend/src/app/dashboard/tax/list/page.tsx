@@ -5,7 +5,7 @@ import api from '@/lib/api';
 import Link from 'next/link';
 
 interface City {
-  id: string;
+  id: number;
   city: string;
   city_rate: string;
   county_rate: string;
@@ -13,7 +13,7 @@ interface City {
 }
 
 interface TaxTable {
-  id: string;
+  id: number;
   state: string;
   state_rate: string;
   include_shipping: string;
@@ -21,136 +21,94 @@ interface TaxTable {
   cities?: City[];
 }
 
-const stateOptions: Record<string, string> = {
-  'AL': 'Alabama',
-  'AK': 'Alaska',
-  'AZ': 'Arizona',
-  'AR': 'Arkansas',
-  'CA': 'California',
-  'CO': 'Colorado',
-  'CT': 'Connecticut',
-  'DE': 'Delaware',
-  'FL': 'Florida',
-  'GA': 'Georgia',
-  'HI': 'Hawaii',
-  'ID': 'Idaho',
-  'IL': 'Illinois',
-  'IN': 'Indiana',
-  'IA': 'Iowa',
-  'KS': 'Kansas',
-  'KY': 'Kentucky',
-  'LA': 'Louisiana',
-  'ME': 'Maine',
-  'MD': 'Maryland',
-  'MA': 'Massachusetts',
-  'MI': 'Michigan',
-  'MN': 'Minnesota',
-  'MS': 'Mississippi',
-  'MO': 'Missouri',
-  'MT': 'Montana',
-  'NE': 'Nebraska',
-  'NV': 'Nevada',
-  'NH': 'New Hampshire',
-  'NJ': 'New Jersey',
-  'NM': 'New Mexico',
-  'NY': 'New York',
-  'NC': 'North Carolina',
-  'ND': 'North Dakota',
-  'OH': 'Ohio',
-  'OK': 'Oklahoma',
-  'OR': 'Oregon',
-  'PA': 'Pennsylvania',
-  'RI': 'Rhode Island',
-  'SC': 'South Carolina',
-  'SD': 'South Dakota',
-  'TN': 'Tennessee',
-  'TX': 'Texas',
-  'UT': 'Utah',
-  'VT': 'Vermont',
-  'VA': 'Virginia',
-  'WA': 'Washington',
-  'WV': 'West Virginia',
-  'WI': 'Wisconsin',
-  'WY': 'Wyoming',
-};
-
 export default function TaxListPage() {
   const [tables, setTables] = useState<TaxTable[]>([]);
+  const [stateNames, setStateNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedStates, setExpandedStates] = useState<Set<string>>(new Set());
+  const [success, setSuccess] = useState<string | null>(null);
+  const [expandedStates, setExpandedStates] = useState<Set<number>>(new Set());
   const [formData, setFormData] = useState<Record<string, any>>({});
+  const [deleteStates, setDeleteStates] = useState<Set<number>>(new Set());
+  const [deleteCities, setDeleteCities] = useState<Set<number>>(new Set());
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    fetchTables();
-  }, []);
+  useEffect(() => { fetchTables(); }, []);
 
   const fetchTables = async () => {
     try {
       const res = await api.get('/tax/tables');
       const data = res.data.data || [];
+      const states = res.data.states || {};
+      setStateNames(states);
       setTables(data);
 
-      // Initialize form data
       const initial: Record<string, any> = {};
-      data.forEach((table: TaxTable) => {
-        initial[`state_rate_${table.id}`] = table.state_rate;
-        initial[`include_shipping_${table.id}`] = table.include_shipping === 'y';
-        initial[`apply_tax_to_${table.id}`] = table.apply_tax_to || 'ship';
-        if (table.cities) {
-          table.cities.forEach((city) => {
-            initial[`city_rate_${city.id}`] = city.city_rate;
-            initial[`county_rate_${city.id}`] = city.county_rate;
-            initial[`local_rate_${city.id}`] = city.local_rate;
+      data.forEach((t: TaxTable) => {
+        initial[`state_rate_${t.id}`] = t.state_rate;
+        initial[`include_shipping_${t.id}`] = t.include_shipping === 'y';
+        initial[`apply_tax_to_${t.id}`] = t.apply_tax_to || 'ship';
+        if (t.cities) {
+          t.cities.forEach((c) => {
+            initial[`city_rate_${c.id}`] = c.city_rate;
+            initial[`county_rate_${c.id}`] = c.county_rate;
+            initial[`local_rate_${c.id}`] = c.local_rate;
           });
         }
       });
       setFormData(initial);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load tax tables');
+      setError(err.response?.data?.detail || 'Failed to load tax tables');
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleExpanded = (stateId: string) => {
-    const newExpanded = new Set(expandedStates);
-    if (newExpanded.has(stateId)) {
-      newExpanded.delete(stateId);
-    } else {
-      newExpanded.add(stateId);
-    }
-    setExpandedStates(newExpanded);
+  const toggleExpanded = (stateId: number) => {
+    const n = new Set(expandedStates);
+    if (n.has(stateId)) n.delete(stateId); else n.add(stateId);
+    setExpandedStates(n);
   };
 
-  const handleDelete = async (tableId: string) => {
-    if (!window.confirm('Delete this tax table?')) return;
-    try {
-      await api.delete(`/tax/tables/${tableId}`);
-      fetchTables();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to delete tax table');
-    }
+  const toggleDeleteState = (id: number) => {
+    const n = new Set(deleteStates);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    setDeleteStates(n);
+  };
+
+  const toggleDeleteCity = (id: number) => {
+    const n = new Set(deleteCities);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    setDeleteCities(n);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSuccess(null); setError(null); setSaving(true);
     try {
-      await api.post('/tax/tables/update', formData);
-      alert('Tax tables updated successfully');
-      fetchTables();
+      const payload: Record<string, any> = { ...formData };
+      if (deleteStates.size > 0) payload.delete_state = Array.from(deleteStates);
+      if (deleteCities.size > 0) payload.delete_city = Array.from(deleteCities);
+
+      await api.post('/tax/tables/update', payload);
+      setSuccess('Tax tables updated successfully');
+      setDeleteStates(new Set());
+      setDeleteCities(new Set());
+      setTimeout(() => { setSuccess(null); fetchTables(); }, 1500);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to update tax tables');
+      setError(err.response?.data?.detail || 'Failed to update tax tables');
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="container-fluid" style={{ padding: '20px' }}>
-        <div className="alert alert-info">Loading tax tables...</div>
-      </div>
-    );
-  }
+  const hasChanges = deleteStates.size > 0 || deleteCities.size > 0 || true; // always enable
+
+  if (loading) return (
+    <div className="container-fluid" style={{ padding: '20px' }}>
+      <p><i className="fa fa-spinner fa-spin"></i> Loading tax tables...</p>
+    </div>
+  );
 
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
@@ -162,23 +120,23 @@ export default function TaxListPage() {
       </div>
       <br />
 
-      {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger">{error}</div></div></div>}
+      {error && <div className="alert alert-danger">{error}</div>}
+      {success && <div className="alert alert-success">{success}</div>}
 
       <p>
-        <Link href="/dashboard/tax/add" className="btn btn-primary btn-sm"><i className="fa fa-plus"></i> Add Tax Tables</Link>
+        <Link href="/dashboard/tax/add" className="btn btn-primary btn-sm">Add Tax Tables</Link>
       </p>
       <br />
 
       <form onSubmit={handleSubmit}>
-        <input type="submit" id="topBtn" disabled className="btn btn-primary" value="Submit" style={{ marginBottom: '20px' }} />
-        <br />
-        <br />
+        <input type="submit" value="Submit" className="btn btn-primary" disabled={saving} />
+        <br /><br />
 
         <div className="row">
           <div className="col-lg-12">
             <div className="well well-cv3-table">
               <div className="table-responsive">
-                <table className="table table-hover table-striped">
+                <table className="table table-hover table-striped cv3-data-table">
                   <thead>
                     <tr>
                       <th style={{ width: '45%' }}>Location</th>
@@ -189,7 +147,9 @@ export default function TaxListPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {tables.length > 0 ? tables.map((table) => (
+                    {tables.length === 0 ? (
+                      <tr><td colSpan={5} className="text-center">No tax tables found</td></tr>
+                    ) : tables.map((table) => (
                       <React.Fragment key={table.id}>
                         <tr>
                           <td colSpan={5}>
@@ -197,59 +157,38 @@ export default function TaxListPage() {
                               <tbody>
                                 <tr>
                                   <td>
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleExpanded(table.id)}
-                                      style={{ textDecoration: 'none', background: 'none', border: 'none', cursor: 'pointer' }}
-                                    >
-                                      <i
-                                        className={`fa ${expandedStates.has(table.id) ? 'fa-minus-square' : 'fa-plus-square'}`}
-                                        style={{ marginRight: '8px' }}
-                                      ></i>
-                                    </button>
-                                    {stateOptions[table.state] || table.state}
+                                    <a href="#" onClick={(e) => { e.preventDefault(); toggleExpanded(table.id); }}
+                                      style={{ textDecoration: 'none' }}>
+                                      <i className={`fa fa-${expandedStates.has(table.id) ? 'minus' : 'plus'}-square`}
+                                        style={{ marginRight: '8px' }}></i>
+                                    </a>
+                                    {stateNames[table.state] || table.state}
                                   </td>
                                   <td style={{ width: '15%' }}>
-                                    <input
-                                      type="text"
-                                      className="form-control form-control-inline"
-                                      size={5}
+                                    <input type="text" className="form-control form-control-inline" size={5}
                                       value={formData[`state_rate_${table.id}`] || ''}
-                                      onChange={(e) => setFormData({ ...formData, [`state_rate_${table.id}`]: e.target.value })}
-                                    />
+                                      onChange={(e) => setFormData({ ...formData, [`state_rate_${table.id}`]: e.target.value })} />
                                   </td>
                                   <td style={{ width: '15%', textAlign: 'center' }}>&nbsp;</td>
                                   <td style={{ width: '15%', textAlign: 'center' }}>&nbsp;</td>
                                   <td style={{ width: '10%', textAlign: 'center' }}>
-                                    <input type="checkbox" name="delete_state[]" value={table.id} />
+                                    <input type="checkbox"
+                                      checked={deleteStates.has(table.id)}
+                                      onChange={() => toggleDeleteState(table.id)} />
                                   </td>
                                 </tr>
-                              </tbody>
-                            </table>
-                          </td>
-                        </tr>
-                        <tr>
-                          <td colSpan={5}>
-                            <table style={{ width: '100%' }}>
-                              <tbody>
                                 <tr>
                                   <td style={{ textAlign: 'center' }}>
-                                    <input
-                                      type="checkbox"
-                                      name={`include_shipping_${table.id}`}
+                                    <input type="checkbox"
                                       checked={formData[`include_shipping_${table.id}`] || false}
                                       onChange={(e) => setFormData({ ...formData, [`include_shipping_${table.id}`]: e.target.checked })}
-                                    />
-                                    {' '}include shipping
+                                    /> include shipping
                                   </td>
                                   <td colSpan={4}>
-                                    apply tax to{' '}
-                                    <select
-                                      name={`apply_tax_to_${table.id}`}
-                                      className="form-control form-control-inline"
+                                    apply tax to&nbsp;
+                                    <select className="form-control form-control-inline"
                                       value={formData[`apply_tax_to_${table.id}`] || 'ship'}
-                                      onChange={(e) => setFormData({ ...formData, [`apply_tax_to_${table.id}`]: e.target.value })}
-                                    >
+                                      onChange={(e) => setFormData({ ...formData, [`apply_tax_to_${table.id}`]: e.target.value })}>
                                       <option value="ship">Shipping State</option>
                                       <option value="bill">Billing State</option>
                                       <option value="both">Shipping or Billing State</option>
@@ -260,47 +199,37 @@ export default function TaxListPage() {
                             </table>
                           </td>
                         </tr>
-                        {expandedStates.has(table.id) && table.cities && (
+                        {expandedStates.has(table.id) && table.cities && table.cities.length > 0 && (
                           <tr>
                             <td colSpan={5}>
                               {table.cities.map((city) => (
-                                <table key={city.id} className="table table-striped" style={{ width: '100%', marginBottom: '10px' }}>
+                                <table key={city.id} className="table table-striped cv3-data-table" style={{ width: '100%', marginBottom: '2px' }}>
                                   <tbody>
                                     <tr>
-                                      <td style={{ width: '45%' }}>
-                                        <i className="fa fa-folder" style={{ marginRight: '8px' }}></i>
-                                        <i className="fa fa-folder" style={{ marginRight: '8px' }}></i>
+                                      <td style={{ width: '45%', paddingLeft: '40px' }}>
+                                        <i className="fa fa-folder" style={{ marginRight: '4px', color: '#999' }}></i>
+                                        <i className="fa fa-folder" style={{ marginRight: '4px', color: '#999' }}></i>
                                         {city.city}
                                       </td>
                                       <td style={{ width: '15%' }}>
-                                        <input
-                                          type="text"
-                                          className="form-control form-control-inline"
-                                          size={5}
+                                        <input type="text" className="form-control form-control-inline" size={5}
                                           value={formData[`city_rate_${city.id}`] || ''}
-                                          onChange={(e) => setFormData({ ...formData, [`city_rate_${city.id}`]: e.target.value })}
-                                        />
+                                          onChange={(e) => setFormData({ ...formData, [`city_rate_${city.id}`]: e.target.value })} />
                                       </td>
                                       <td style={{ width: '15%', textAlign: 'center' }}>
-                                        <input
-                                          type="text"
-                                          className="form-control form-control-inline"
-                                          size={5}
+                                        <input type="text" className="form-control form-control-inline" size={5}
                                           value={formData[`county_rate_${city.id}`] || ''}
-                                          onChange={(e) => setFormData({ ...formData, [`county_rate_${city.id}`]: e.target.value })}
-                                        />
+                                          onChange={(e) => setFormData({ ...formData, [`county_rate_${city.id}`]: e.target.value })} />
                                       </td>
                                       <td style={{ width: '15%', textAlign: 'center' }}>
-                                        <input
-                                          type="text"
-                                          className="form-control form-control-inline"
-                                          size={5}
+                                        <input type="text" className="form-control form-control-inline" size={5}
                                           value={formData[`local_rate_${city.id}`] || ''}
-                                          onChange={(e) => setFormData({ ...formData, [`local_rate_${city.id}`]: e.target.value })}
-                                        />
+                                          onChange={(e) => setFormData({ ...formData, [`local_rate_${city.id}`]: e.target.value })} />
                                       </td>
                                       <td style={{ width: '10%', textAlign: 'center' }}>
-                                        <input type="checkbox" name="delete[]" value={city.id} />
+                                        <input type="checkbox"
+                                          checked={deleteCities.has(city.id)}
+                                          onChange={() => toggleDeleteCity(city.id)} />
                                       </td>
                                     </tr>
                                   </tbody>
@@ -310,14 +239,12 @@ export default function TaxListPage() {
                           </tr>
                         )}
                       </React.Fragment>
-                    )) : (
-                      <tr><td colSpan={5} className="text-center">No tax tables found</td></tr>
-                    )}
+                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
-            <input type="submit" value="Submit" className="btn btn-primary" style={{ marginTop: '20px' }} />
+            <input type="submit" value="Submit" className="btn btn-primary" disabled={saving} />
           </div>
         </div>
       </form>

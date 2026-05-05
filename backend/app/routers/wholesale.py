@@ -1,422 +1,505 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from pydantic import BaseModel
-from typing import Optional
-from app.database import get_db
+from app.database import get_db, get_store_db_name, get_store_session
 from app.models.user import User
 from app.dependencies import get_current_admin_user
-from datetime import datetime
+from typing import Optional, List
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/wholesale", tags=["wholesale"])
 
 
-class WholesaleMember(BaseModel):
-    id: Optional[int] = None
-    company_name: str
-    contact_email: str
-    contact_phone: Optional[str] = None
-    status: str = "active"
-    created_at: Optional[str] = None
+# ─── WHOLESALE ORDERS (store DB: wholesale_order + wholesaler_info) ──────────
 
-    class Config:
-        from_attributes = True
-
-
-class WholesaleOrder(BaseModel):
-    id: Optional[int] = None
-    member_id: int
-    order_number: str
-    order_date: str
-    total_amount: float
-    status: str = "pending"
-    created_at: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
-
-class WholesaleShipping(BaseModel):
-    id: Optional[int] = None
-    member_id: int
-    shipping_method: str
-    cost: float
-    created_at: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
-
-# WHOLESALE APPROVAL
-@router.get("/approve")
-def get_pending_wholesale_members(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    """Get wholesale members pending approval."""
-    try:
-        result = db.execute(text(
-            "SELECT id, company_name, contact_email, contact_phone, status, created_at "
-            "FROM wholesale_members WHERE status = 'pending' OR status = 'new' "
-            "ORDER BY created_at DESC"
-        )).fetchall()
-
-        members = [
-            {
-                "id": row.id,
-                "company_name": row.company_name,
-                "contact_email": row.contact_email,
-                "contact_phone": row.contact_phone,
-                "status": row.status,
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-            }
-            for row in result
-        ]
-        return {"data": members}
-    except Exception as e:
-        # Table might not exist
-        return {"data": []}
-
-
-@router.post("/approve/{member_id}")
-def approve_wholesale_member(
-    member_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    """Approve a wholesale member."""
-    try:
-        db.execute(text(
-            "UPDATE wholesale_members SET status = 'active' WHERE id = :id"
-        ), {"id": member_id})
-        db.commit()
-        return {"message": "Wholesale member approved successfully"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/reject/{member_id}")
-def reject_wholesale_member(
-    member_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    """Reject a wholesale member."""
-    try:
-        db.execute(text(
-            "UPDATE wholesale_members SET status = 'rejected' WHERE id = :id"
-        ), {"id": member_id})
-        db.commit()
-        return {"message": "Wholesale member rejected"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# WHOLESALE MEMBERS
-@router.get("/members")
-def get_wholesale_members(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-    search: Optional[str] = None,
-):
-    """Get all wholesale members."""
-    try:
-        query = "SELECT id, company_name, contact_email, contact_phone, status, created_at FROM wholesale_members"
-        params = {}
-
-        if search:
-            query += " WHERE company_name LIKE :search OR contact_email LIKE :search"
-            params["search"] = f"%{search}%"
-
-        query += " ORDER BY company_name"
-
-        result = db.execute(text(query), params).fetchall()
-
-        members = [
-            {
-                "id": row.id,
-                "company_name": row.company_name,
-                "contact_email": row.contact_email,
-                "contact_phone": row.contact_phone,
-                "status": row.status,
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-            }
-            for row in result
-        ]
-        return {"data": members}
-    except Exception as e:
-        if "doesn't exist" in str(e):
-            return {"data": []}
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/members/{member_id}")
-def get_wholesale_member(
-    member_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    """Get a single wholesale member."""
-    try:
-        result = db.execute(text(
-            "SELECT id, company_name, contact_email, contact_phone, status, created_at "
-            "FROM wholesale_members WHERE id = :id"
-        ), {"id": member_id}).fetchone()
-
-        if not result:
-            raise HTTPException(status_code=404, detail="Wholesale member not found")
-
-        return {
-            "id": result.id,
-            "company_name": result.company_name,
-            "contact_email": result.contact_email,
-            "contact_phone": result.contact_phone,
-            "status": result.status,
-            "created_at": result.created_at.isoformat() if result.created_at else None,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/members")
-def create_wholesale_member(
-    member: WholesaleMember,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    """Create a new wholesale member."""
-    try:
-        db.execute(text(
-            "INSERT INTO wholesale_members (company_name, contact_email, contact_phone, status, created_at) "
-            "VALUES (:company_name, :contact_email, :contact_phone, :status, :created_at)"
-        ), {
-            "company_name": member.company_name,
-            "contact_email": member.contact_email,
-            "contact_phone": member.contact_phone,
-            "status": member.status,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        db.commit()
-
-        return {"message": "Wholesale member created successfully"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.put("/members/{member_id}")
-def update_wholesale_member(
-    member_id: int,
-    member: WholesaleMember,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    """Update a wholesale member."""
-    try:
-        db.execute(text(
-            "UPDATE wholesale_members SET company_name = :company_name, contact_email = :contact_email, "
-            "contact_phone = :contact_phone, status = :status WHERE id = :id"
-        ), {
-            "id": member_id,
-            "company_name": member.company_name,
-            "contact_email": member.contact_email,
-            "contact_phone": member.contact_phone,
-            "status": member.status,
-        })
-        db.commit()
-
-        return {"message": "Wholesale member updated successfully"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/members/{member_id}")
-def delete_wholesale_member(
-    member_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    """Delete a wholesale member."""
-    try:
-        db.execute(text("DELETE FROM wholesale_members WHERE id = :id"), {"id": member_id})
-        db.commit()
-
-        return {"message": "Wholesale member deleted successfully"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# WHOLESALE ORDERS
 @router.get("/orders")
 def get_wholesale_orders(
+    site_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Get all wholesale orders."""
+    """Get unprocessed wholesale orders (not yet in a batch)."""
+    store_db = None
     try:
-        result = db.execute(text(
-            "SELECT wo.id, wo.member_id, wo.order_number, wo.order_date, wo.total_amount, wo.status, wo.created_at, "
-            "wm.company_name FROM wholesale_orders wo "
-            "LEFT JOIN wholesale_members wm ON wo.member_id = wm.id "
-            "ORDER BY wo.order_date DESC"
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        rows = store_db.execute(text(
+            "SELECT wo.wsorder_id, wo.date_ordered, wo.status, wo.in_batch, wi.email "
+            "FROM wholesale_order AS wo, wholesaler_info AS wi "
+            "WHERE (wo.invalid <> 'y' OR wo.invalid IS NULL) "
+            "AND wo.ws_id = wi.ws_id "
+            "AND (wo.in_batch = '' OR wo.in_batch IS NULL) "
+            "ORDER BY wo.wsorder_id"
         )).fetchall()
 
-        orders = [
-            {
-                "id": row.id,
-                "member_id": row.member_id,
-                "member_name": row.company_name,
-                "order_number": row.order_number,
-                "order_date": row.order_date.isoformat() if row.order_date else None,
-                "total_amount": float(row.total_amount),
-                "status": row.status,
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-            }
-            for row in result
-        ]
-        return {"data": orders}
+        orders = []
+        order_ids = []
+        for row in rows:
+            orders.append({
+                "wsorder_id": row.wsorder_id,
+                "date_ordered": str(row.date_ordered) if row.date_ordered else "",
+                "email": row.email or "",
+            })
+            order_ids.append(str(row.wsorder_id))
+
+        return {
+            "data": orders,
+            "count": len(orders),
+            "list": ",".join(order_ids),
+        }
     except Exception as e:
-        if "doesn't exist" in str(e):
-            return {"data": []}
+        if "doesn't exist" in str(e).lower():
+            return {"data": [], "count": 0, "list": ""}
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
 
 
-@router.get("/orders/{order_id}")
-def get_wholesale_order(
-    order_id: int,
+@router.post("/orders/batch")
+def batch_wholesale_orders(
+    site_id: int = Query(...),
+    order_list: str = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Get a single wholesale order."""
+    """Mark orders as batched (set in_batch to 'save' then lock with timestamp)."""
+    store_db = None
     try:
-        result = db.execute(text(
-            "SELECT wo.id, wo.member_id, wo.order_number, wo.order_date, wo.total_amount, wo.status, wo.created_at, "
-            "wm.company_name FROM wholesale_orders wo "
-            "LEFT JOIN wholesale_members wm ON wo.member_id = wm.id "
-            "WHERE wo.id = :id"
-        ), {"id": order_id}).fetchone()
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
 
-        if not result:
-            raise HTTPException(status_code=404, detail="Wholesale order not found")
+        ids = [i.strip() for i in order_list.split(",") if i.strip()]
+        if not ids:
+            raise HTTPException(status_code=400, detail="No order IDs provided")
 
-        return {
-            "id": result.id,
-            "member_id": result.member_id,
-            "member_name": result.company_name,
-            "order_number": result.order_number,
-            "order_date": result.order_date.isoformat() if result.order_date else None,
-            "total_amount": float(result.total_amount),
-            "status": result.status,
-            "created_at": result.created_at.isoformat() if result.created_at else None,
-        }
+        # Mark as 'save' first
+        for oid in ids:
+            store_db.execute(text(
+                "UPDATE wholesale_order SET in_batch='save' WHERE wsorder_id=:id"
+            ), {"id": oid})
+
+        # Then lock with timestamp
+        rows = store_db.execute(text(
+            "SELECT wsorder_id FROM wholesale_order WHERE in_batch='save'"
+        )).fetchall()
+        for row in rows:
+            store_db.execute(text(
+                "UPDATE wholesale_order SET in_batch=NOW() WHERE wsorder_id=:id"
+            ), {"id": row.wsorder_id})
+
+        store_db.commit()
+        return {"message": "Orders batched successfully", "count": len(ids)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.post("/orders/reprint")
+def reprint_last_batch(
+    site_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Get previously saved/batched orders for reprinting."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        rows = store_db.execute(text(
+            "SELECT wsorder_id FROM wholesale_order "
+            "WHERE in_batch IS NOT NULL AND in_batch <> '' AND in_batch <> 'save' "
+            "ORDER BY wsorder_id"
+        )).fetchall()
+
+        order_ids = [str(row.wsorder_id) for row in rows]
+        return {"list": ",".join(order_ids), "count": len(order_ids)}
+    except Exception as e:
+        if "doesn't exist" in str(e).lower():
+            return {"list": "", "count": 0}
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.delete("/orders/{order_id}")
+def delete_wholesale_order(
+    order_id: int,
+    site_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Mark a wholesale order as invalid (soft delete)."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        store_db.execute(text(
+            "UPDATE wholesale_order SET invalid='y' WHERE wsorder_id=:id"
+        ), {"id": order_id})
+        store_db.commit()
+        return {"message": "Order deleted successfully"}
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+# ─── APPROVE WHOLESALERS (store DB: wholesaler_info) ────────────────────────
+
+@router.get("/approve")
+def get_new_wholesalers(
+    site_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Get wholesalers pending approval (new_ws='y')."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        rows = store_db.execute(text(
+            "SELECT ws_id, company_name, contact_first_name, contact_last_name, "
+            "billing_city, billing_state "
+            "FROM wholesaler_info "
+            "WHERE new_ws = 'y' AND (removed != 'y' OR removed IS NULL)"
+        )).fetchall()
+
+        data = []
+        for row in rows:
+            data.append({
+                "ws_id": row.ws_id,
+                "company_name": row.company_name or "",
+                "contact_first_name": row.contact_first_name or "",
+                "contact_last_name": row.contact_last_name or "",
+                "billing_city": row.billing_city or "",
+                "billing_state": row.billing_state or "",
+            })
+
+        return {"data": data, "count": len(data)}
+    except Exception as e:
+        if "doesn't exist" in str(e).lower():
+            return {"data": [], "count": 0}
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.post("/approve")
+def approve_wholesalers(
+    site_id: int = Query(...),
+    body: dict = ...,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Approve selected wholesalers. Body: { "ws_ids": [1, 2, 3] }"""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        ws_ids = body.get("ws_ids", [])
+        if not ws_ids:
+            raise HTTPException(status_code=400, detail="No wholesalers selected")
+
+        for ws_id in ws_ids:
+            store_db.execute(text(
+                "UPDATE wholesaler_info SET new_ws='', active='1' WHERE ws_id=:id"
+            ), {"id": ws_id})
+
+        store_db.commit()
+        return {"message": f"{len(ws_ids)} wholesaler(s) approved successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.get("/view/{ws_id}")
+def get_wholesaler_detail(
+    ws_id: int,
+    site_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Get full wholesaler detail for popup view."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        row = store_db.execute(text(
+            "SELECT * FROM wholesaler_info WHERE ws_id=:id"
+        ), {"id": ws_id}).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Wholesaler not found")
+
+        cols = row._mapping
+        return {"data": {k: (str(v) if v is not None else "") for k, v in cols.items()}}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
 
 
-# WHOLESALE SHIPPING
-@router.get("/shipping")
-def get_wholesale_shipping(
+@router.delete("/wholesaler/{ws_id}")
+def delete_wholesaler(
+    ws_id: int,
+    site_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Get all wholesale shipping methods."""
+    """Soft delete a wholesaler (set removed='y')."""
+    store_db = None
     try:
-        result = db.execute(text(
-            "SELECT ws.id, ws.member_id, ws.shipping_method, ws.cost, ws.created_at, "
-            "wm.company_name FROM wholesale_shipping ws "
-            "LEFT JOIN wholesale_members wm ON ws.member_id = wm.id "
-            "ORDER BY wm.company_name"
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        store_db.execute(text(
+            "UPDATE wholesaler_info SET removed='y' WHERE ws_id=:id"
+        ), {"id": ws_id})
+        store_db.commit()
+        return {"message": "Wholesaler deleted successfully"}
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+# ─── SEARCH WHOLESALERS (store DB: wholesaler_info) ─────────────────────────
+
+@router.get("/list")
+def get_wholesaler_list(
+    site_id: int = Query(...),
+    limit_by: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Search/list wholesalers with optional filtering."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        base_query = (
+            "SELECT ws_id, company_name, contact_first_name, contact_last_name, "
+            "billing_city, billing_state, active, new_ws "
+            "FROM wholesaler_info "
+            "WHERE (removed != 'y' OR removed IS NULL)"
+        )
+        params = {}
+
+        if limit_by and search:
+            if limit_by == "active":
+                base_query += " AND active='1'"
+            elif limit_by == "inactive":
+                base_query += " AND (active != '1' OR active IS NULL)"
+            elif limit_by == "new":
+                base_query += " AND new_ws = 'y'"
+            else:
+                # Search by column name (company_name, email, contact_last_name, billing_state)
+                allowed_cols = ["company_name", "email", "contact_last_name", "billing_state"]
+                if limit_by in allowed_cols:
+                    base_query += f" AND {limit_by} LIKE :search"
+                    params["search"] = f"%{search}%"
+
+        base_query += " ORDER BY company_name"
+
+        rows = store_db.execute(text(base_query), params).fetchall()
+
+        data = []
+        for row in rows:
+            status = "new" if row.new_ws == "y" else ("active" if row.active == "1" else "inactive")
+            data.append({
+                "ws_id": row.ws_id,
+                "company_name": row.company_name or "",
+                "contact_first_name": row.contact_first_name or "",
+                "contact_last_name": row.contact_last_name or "",
+                "billing_city": row.billing_city or "",
+                "billing_state": row.billing_state or "",
+                "status": status,
+            })
+
+        # Search options (static list matching old platform)
+        options = {
+            "company_name": "Company Name",
+            "email": "Email Address",
+            "contact_last_name": "Contact Last Name",
+            "billing_state": "State",
+            "active": "Show Only Active",
+            "inactive": "Show Only Inactive",
+            "new": "Show Only New Requests",
+        }
+
+        return {"data": data, "options": options}
+    except Exception as e:
+        if "doesn't exist" in str(e).lower():
+            return {"data": [], "options": {}}
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+# ─── WHOLESALE SHIPPING (store DB: ws_shipper) ──────────────────────────────
+
+@router.get("/shipping")
+def get_ws_shipping_list(
+    site_id: int = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Get wholesale shipping methods list."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        rows = store_db.execute(text(
+            "SELECT id, method, code "
+            "FROM ws_shipper "
+            "WHERE inactive IS NULL OR inactive='' "
+            "ORDER BY method"
         )).fetchall()
 
-        shipping = [
-            {
+        data = []
+        for row in rows:
+            data.append({
                 "id": row.id,
-                "member_id": row.member_id,
-                "member_name": row.company_name,
-                "shipping_method": row.shipping_method,
-                "cost": float(row.cost),
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-            }
-            for row in result
-        ]
-        return {"data": shipping}
+                "method": row.method or "",
+                "code": row.code or "",
+            })
+
+        return {"data": data}
     except Exception as e:
-        if "doesn't exist" in str(e):
+        if "doesn't exist" in str(e).lower():
             return {"data": []}
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
 
 
-@router.post("/shipping")
-def create_wholesale_shipping(
-    shipping: WholesaleShipping,
+@router.delete("/shipping/{shipper_id}")
+def delete_ws_shipper(
+    shipper_id: int,
+    site_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Create a new wholesale shipping method."""
+    """Delete a wholesale shipper and its rates."""
+    store_db = None
     try:
-        db.execute(text(
-            "INSERT INTO wholesale_shipping (member_id, shipping_method, cost, created_at) "
-            "VALUES (:member_id, :shipping_method, :cost, :created_at)"
-        ), {
-            "member_id": shipping.member_id,
-            "shipping_method": shipping.shipping_method,
-            "cost": shipping.cost,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        })
-        db.commit()
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
 
-        return {"message": "Wholesale shipping method created successfully"}
+        # Delete rates first, then shipper
+        store_db.execute(text(
+            "DELETE FROM ws_shipping WHERE method=:id"
+        ), {"id": shipper_id})
+        store_db.execute(text(
+            "DELETE FROM ws_shipper WHERE id=:id"
+        ), {"id": shipper_id})
+        store_db.commit()
+
+        return {"message": "Shipper deleted successfully"}
     except Exception as e:
-        db.rollback()
+        if store_db:
+            store_db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
 
 
-@router.put("/shipping/{shipping_id}")
-def update_wholesale_shipping(
-    shipping_id: int,
-    shipping: WholesaleShipping,
+# ─── WHOLESALE ORDER HISTORY (store DB) ─────────────────────────────────────
+
+@router.get("/order-history/{ws_id}")
+def get_wholesaler_order_history(
+    ws_id: int,
+    site_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Update a wholesale shipping method."""
+    """Get order history for a specific wholesaler."""
+    store_db = None
     try:
-        db.execute(text(
-            "UPDATE wholesale_shipping SET member_id = :member_id, shipping_method = :shipping_method, "
-            "cost = :cost WHERE id = :id"
-        ), {
-            "id": shipping_id,
-            "member_id": shipping.member_id,
-            "shipping_method": shipping.shipping_method,
-            "cost": shipping.cost,
-        })
-        db.commit()
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
 
-        return {"message": "Wholesale shipping method updated successfully"}
+        rows = store_db.execute(text(
+            "SELECT wsorder_id, date_ordered, status, in_batch "
+            "FROM wholesale_order "
+            "WHERE ws_id=:ws_id AND (invalid <> 'y' OR invalid IS NULL) "
+            "ORDER BY date_ordered DESC"
+        ), {"ws_id": ws_id}).fetchall()
+
+        data = []
+        for row in rows:
+            data.append({
+                "wsorder_id": row.wsorder_id,
+                "date_ordered": str(row.date_ordered) if row.date_ordered else "",
+                "status": row.status or "",
+                "in_batch": str(row.in_batch) if row.in_batch else "",
+            })
+
+        return {"data": data}
     except Exception as e:
-        db.rollback()
+        if "doesn't exist" in str(e).lower():
+            return {"data": []}
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/shipping/{shipping_id}")
-def delete_wholesale_shipping(
-    shipping_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user),
-):
-    """Delete a wholesale shipping method."""
-    try:
-        db.execute(text("DELETE FROM wholesale_shipping WHERE id = :id"), {"id": shipping_id})
-        db.commit()
-
-        return {"message": "Wholesale shipping method deleted successfully"}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()

@@ -66,16 +66,17 @@ def get_blastqueue(
 
         blasts = []
         for row in blast_rows:
+            row_dict = row._mapping
             blasts.append({
-                "id": row.id,
-                "site_id": row.site_id,
-                "store_name": row.store_name or "",
-                "email_size": row.email_size or 0,
-                "emails_to_send": row.emails_to_send or 0,
-                "sent": row.sent or 0,
-                "percent_complete": row.percent_complete or 0,
-                "start_time": row.start_time.isoformat() if row.start_time else None,
-                "send_server": row.send_server or "",
+                "blast_id": row_dict.get("id", 0),
+                "store": row_dict.get("store_name", "") or "",
+                "estimated_size": row_dict.get("estimated_size") or row_dict.get("email_size") or None,
+                "estimated_total": row_dict.get("estimated_total") or row_dict.get("emails_to_send") or 0,
+                "estimated_sent": row_dict.get("estimated_sent") or row_dict.get("sent") or 0,
+                "estimated_start": str(row_dict.get("estimated_start") or row_dict.get("start_time") or ""),
+                "last_modified": str(row_dict.get("last_modified") or ""),
+                "send_server": row_dict.get("send_server") or "",
+                "from_account": row_dict.get("from_account") or "",
             })
 
         return {"blasts": blasts}
@@ -125,16 +126,56 @@ def get_contracts(
         contracts = [
             {
                 "id": row.id,
-                "contract_file": row.name or "",
-                "created_at": row.date_uploaded.isoformat() if row.date_uploaded else None,
+                "name": row.name or "",
+                "date_uploaded": str(row.date_uploaded or ""),
                 "active": row.active or "n",
             }
             for row in contracts_rows
         ]
 
-        return {"contracts": contracts}
+        # Get contract activities
+        activities = []
+        try:
+            activity_rows = db.execute(text(
+                "SELECT ca.contract_id, s.name, u.username, ca.agreed_to, "
+                "ca.disagreements, ca.last_activity "
+                "FROM contract_activities ca "
+                "LEFT JOIN sites s ON ca.site_id = s.id "
+                "LEFT JOIN users u ON ca.uid = u.uid "
+                "ORDER BY ca.last_activity DESC"
+            )).fetchall()
+            activities = [
+                {
+                    "contract_id": row.contract_id,
+                    "name": row.name or "",
+                    "username": row.username or "",
+                    "agreed_to": row.agreed_to or "",
+                    "disagreements": row.disagreements or 0,
+                    "last_activity": str(row.last_activity or ""),
+                }
+                for row in activity_rows
+            ]
+        except Exception:
+            pass
+
+        # Get contracts_enabled setting
+        contracts_enabled = "n"
+        try:
+            enabled_row = db.execute(text(
+                "SELECT value FROM admin_info WHERE field = 'enable_contracts'"
+            )).fetchone()
+            if enabled_row:
+                contracts_enabled = enabled_row.value or "n"
+        except Exception:
+            pass
+
+        return {
+            "contracts": contracts,
+            "activities": activities,
+            "contracts_enabled": contracts_enabled,
+        }
     except Exception:
-        return {"contracts": []}
+        return {"contracts": [], "activities": [], "contracts_enabled": "n"}
 
 
 @router.get("/storeoptions")
@@ -142,23 +183,79 @@ def get_storeoptions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Get all store options."""
+    """Get store names for the search form dropdown."""
 
     stores_rows = db.execute(text(
-        "SELECT s.id, s.name, s.is_live, s.domain FROM sites AS s ORDER BY s.name"
+        "SELECT name FROM sites ORDER BY name"
     )).fetchall()
 
-    stores = [
-        {
-            "id": row.id,
-            "name": row.name,
-            "is_live": row.is_live or "n",
-            "domain": row.domain or "",
-        }
-        for row in stores_rows
-    ]
+    stores = [row.name for row in stores_rows if row.name]
 
     return {"stores": stores}
+
+
+@router.post("/storeoptions/search")
+def search_storeoptions(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Search stores by various option criteria."""
+
+    store_name = data.get("store", "")
+
+    # If searching for a specific store
+    if store_name:
+        row = db.execute(text(
+            "SELECT * FROM sites WHERE name = :name"
+        ), {"name": store_name}).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        row_dict = row._mapping
+        return {
+            "store_details": {
+                "name": row_dict.get("name", ""),
+                "is_live": row_dict.get("is_live", "n"),
+                "export_type": row_dict.get("export_type", ""),
+                "order_management": row_dict.get("order_management", ""),
+                "billing_type": row_dict.get("billing_type", ""),
+                "shipping_type": row_dict.get("shipping_type", ""),
+                "ship_type": row_dict.get("ship_type", ""),
+                "ship_calc": row_dict.get("ship_calc", ""),
+                "checkout_type": row_dict.get("checkout_type", ""),
+                "tax_api_calc": row_dict.get("tax_api_calc", ""),
+                "api_calc": row_dict.get("api_calc", ""),
+                "inventory_control": row_dict.get("inventory_control", ""),
+                "cart_abandon": row_dict.get("cart_abandon", ""),
+                "payment_methods": row_dict.get("payment_methods", ""),
+            }
+        }
+
+    # Otherwise, build dynamic filter query
+    conditions = []
+    params = {}
+    filter_fields = [
+        "is_live", "tax_api_calc", "api_calc", "inventory_control",
+        "cart_abandon", "ship_calculator", "amazon_pay", "ship_address_confirm",
+        "fractional_qty", "dimensional_shipping", "use_suggested_search",
+        "use_category_filter", "mailchimp_enable", "interactive_pricing",
+        "product_notify",
+    ]
+
+    for field in filter_fields:
+        val = data.get(field, "")
+        if val:
+            conditions.append(f"{field} = :{field}")
+            params[field] = val
+
+    if not conditions:
+        return {"stores": []}
+
+    query = f"SELECT name FROM sites WHERE {' AND '.join(conditions)} ORDER BY name"
+    rows = db.execute(text(query), params).fetchall()
+    return {"stores": [row.name for row in rows]}
 
 
 @router.get("/loginpagemessages")
@@ -235,20 +332,26 @@ def get_block_list(
 
     try:
         blocks_rows = db.execute(text(
-            "SELECT id, block, block_type, active, date_blocked, block_user, comments "
-            "FROM block_list WHERE active = 'y' ORDER BY id DESC"
+            "SELECT id, block, block_type, active, date_blocked, block_user, "
+            "unblock_user, date_unblocked, case_num, comments "
+            "FROM block_list ORDER BY id DESC"
         )).fetchall()
 
-        blocks = [
-            {
-                "id": row.id,
-                "block_type": row.block_type or "",
-                "block_value": row.block or "",
-                "reason": row.comments or "",
-                "created_at": row.date_blocked.isoformat() if row.date_blocked else None,
-            }
-            for row in blocks_rows
-        ]
+        blocks = []
+        for row in blocks_rows:
+            row_dict = row._mapping
+            blocks.append({
+                "id": row_dict.get("id"),
+                "block": row_dict.get("block") or "",
+                "block_type": row_dict.get("block_type") or "",
+                "active": row_dict.get("active") or "n",
+                "block_user": row_dict.get("block_user") or "",
+                "date_blocked": str(row_dict.get("date_blocked") or ""),
+                "unblock_user": row_dict.get("unblock_user") or "",
+                "date_unblocked": str(row_dict.get("date_unblocked") or ""),
+                "case_num": row_dict.get("case_num") or "",
+                "comments": row_dict.get("comments") or "",
+            })
 
         return {"blocks": blocks}
     except Exception:
@@ -341,27 +444,50 @@ def get_dns_records(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Get DNS records for a store."""
+    """Get DNS records for a store. DNS in old platform was managed via external UltraDNS API."""
 
     try:
-        dns_rows = db.execute(text(
-            "SELECT id, record_type, name, value, ttl, created_at FROM dns_records "
-            "WHERE site_id = :site_id ORDER BY name"
-        ), {"site_id": site_id}).fetchall()
+        # Try dns_records table first
+        try:
+            dns_rows = db.execute(text(
+                "SELECT id, record_type, name, value, ttl, created_at FROM dns_records "
+                "WHERE site_id = :site_id ORDER BY name"
+            ), {"site_id": site_id}).fetchall()
 
-        records = [
-            {
-                "id": row.id,
-                "record_type": row.record_type,
-                "name": row.name,
-                "value": row.value,
-                "ttl": row.ttl,
-                "created_at": row.created_at.isoformat() if row.created_at else None,
-            }
-            for row in dns_rows
-        ]
+            records = [
+                {
+                    "id": row.id,
+                    "record_type": row.record_type,
+                    "name": row.name,
+                    "value": row.value,
+                    "ttl": row.ttl,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in dns_rows
+            ]
+            return {"records": records}
+        except Exception:
+            pass
 
-        return {"records": records}
+        # Fallback: get domain info from sites table and return basic info
+        site_row = db.execute(text(
+            "SELECT domain, secure_domain FROM sites WHERE id = :site_id"
+        ), {"site_id": site_id}).first()
+
+        records = []
+        if site_row:
+            if site_row.domain:
+                records.append({
+                    "id": 1, "record_type": "A", "name": site_row.domain,
+                    "value": "(managed externally)", "ttl": 3600, "created_at": None
+                })
+            if site_row.secure_domain and site_row.secure_domain != site_row.domain:
+                records.append({
+                    "id": 2, "record_type": "CNAME", "name": site_row.secure_domain,
+                    "value": "(managed externally)", "ttl": 3600, "created_at": None
+                })
+
+        return {"records": records, "note": "DNS is managed externally via UltraDNS"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -681,6 +807,7 @@ def add_block(
     block_type = data.get("block_type", "")
     block_value = data.get("block_value", "")
     reason = data.get("reason", "")
+    case_num = data.get("case_num", "")
 
     if not block_value:
         raise HTTPException(
@@ -690,12 +817,13 @@ def add_block(
 
     try:
         db.execute(text(
-            "INSERT INTO block_list (block, block_type, active, date_blocked, block_user, comments) "
-            "VALUES (:block, :block_type, 'y', NOW(), :block_user, :comments)"
+            "INSERT INTO block_list (block, block_type, active, date_blocked, block_user, case_num, comments) "
+            "VALUES (:block, :block_type, 'y', NOW(), :block_user, :case_num, :comments)"
         ), {
             "block": block_value,
             "block_type": block_type,
             "block_user": current_user.username if hasattr(current_user, 'username') else "bigadmin",
+            "case_num": case_num,
             "comments": reason,
         })
         db.commit()
@@ -715,6 +843,35 @@ def add_block(
                 "created_at": new_block.date_blocked.isoformat() if new_block.date_blocked else None,
             }
         }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/block-list/unblock")
+def unblock_entries(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Unblock entries by setting active='n' and recording unblock info."""
+
+    ids = data.get("ids", [])
+    comments_map = data.get("comments", {})
+
+    if not ids:
+        raise HTTPException(status_code=400, detail="No IDs provided")
+
+    try:
+        username = current_user.username if hasattr(current_user, 'username') else "bigadmin"
+        for block_id in ids:
+            comment = comments_map.get(str(block_id), "")
+            db.execute(text(
+                "UPDATE block_list SET active='n', unblock_user=:user, "
+                "date_unblocked=NOW(), comments=:comments WHERE id=:id"
+            ), {"user": username, "comments": comment, "id": block_id})
+        db.commit()
+        return {"message": f"Successfully unblocked {len(ids)} entries"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

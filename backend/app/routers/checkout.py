@@ -17,40 +17,43 @@ def get_site_id(request: Request) -> int:
     return int(site_id)
 
 
-def get_checkout_columns(db: Session, table: str) -> set:
-    """Dynamically detect available columns in a table."""
+def _get_checkout_columns(db: Session) -> set:
+    """Dynamically detect available columns in checkout_alternative table."""
     try:
-        result = db.execute(text(f"SHOW COLUMNS FROM {table}")).fetchall()
+        result = db.execute(text("SHOW COLUMNS FROM checkout_alternative")).fetchall()
         return {row[0] for row in result}
     except Exception:
         return set()
 
 
-# Mapping of checkout option types to their DB table/column patterns
+# Column mappings per checkout type - matches old platform checkout_alternative table
 CHECKOUT_TYPE_COLS = {
     'paypal': [
-        'paypal_express', 'paypal_express_email', 'paypal_express_api_username',
-        'paypal_express_api_password', 'paypal_express_api_signature',
-        'paypal_express_sandbox', 'paypal_redirect_to_ppx',
-        'paypal_ppcp_enabled', 'paypal_ppcp_client_id', 'paypal_ppcp_secret',
-        'paypal_ppcp_merchant_id', 'paypal_ppcp_sandbox',
+        'paypal_business', 'paypal_skip', 'paypal_use_shipping',
+        'paypal_unreachable', 'paypal_exp_rest', 'paypal_exp_billing',
+        'paypal_exp_shipping', 'paypal_exp_image',
+        'paypal_exp_rest_version', 'paypal_exp_rest_clientid',
+        'paypal_exp_rest_secret', 'paypal_exp_rest_environment',
+        'paypal_exp_authonly', 'paypal_exp_username', 'paypal_exp_password',
+        'paypal_exp_signature', 'paypal_onboarded', 'paypal_merchant_id_rest',
     ],
-    'amazon-pay': [
-        'amazon_pay_enabled', 'amazon_pay_merchant_id', 'amazon_pay_access_key',
-        'amazon_pay_secret_key', 'amazon_pay_client_id', 'amazon_pay_region',
-        'amazon_pay_sandbox', 'amazon_pay_currency_code',
+    'amazon_pay': [
+        'amazon_pay', 'amazon_pay_testing', 'amazon_pay_test_declines',
+        'amazon_merchant_id', 'amazon_access_key', 'amazon_secret_key',
+        'amazon_client_id', 'amazon_client_key',
     ],
     'bongo': [
-        'bongo_enabled', 'bongo_merchant_id', 'bongo_api_key',
-        'bongo_secret', 'bongo_sandbox',
+        'bongo_checkout', 'bongo_transfer', 'bongo_partner_key',
+        'bongo_shipper', 'bongo_url', 'bongo_cancel_notify',
+        'bongo_exclude_countries', 'bongo_dc_state', 'bongo_dc_zip',
+        'bongo_dc_country',
     ],
     'sezzle': [
-        'sezzle_enabled', 'sezzle_merchant_id', 'sezzle_public_key',
-        'sezzle_private_key', 'sezzle_sandbox',
+        'sezzle', 'sezzle_testing', 'sezzle_public_key', 'sezzle_private_key',
     ],
     'visa': [
-        'visa_checkout_enabled', 'visa_checkout_api_key',
-        'visa_checkout_profile_name', 'visa_checkout_sandbox',
+        'visa_checkout', 'visa_testing', 'visa_merchant_id',
+        'visa_key', 'visa_share', 'visa_enckey',
     ],
 }
 
@@ -62,46 +65,41 @@ def get_checkout_options(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Get checkout options for a given type (paypal, amazon-pay, bongo, sezzle, visa)."""
+    """Get checkout options for a given type from checkout_alternative table."""
     site_id = get_site_id(request)
 
     try:
-        # First try payment_options table
-        cols = set()
-        try:
-            result = db.execute(text("SHOW COLUMNS FROM payment_options")).fetchall()
-            cols = {row[0] for row in result}
-        except Exception:
-            pass
+        cols = _get_checkout_columns(db)
+        if not cols:
+            return {"data": {}}
 
-        expected_cols = CHECKOUT_TYPE_COLS.get(option_type, [])
+        # Normalize option_type (URL uses hyphens, DB uses underscores)
+        db_type = option_type.replace('-', '_')
+        expected_cols = CHECKOUT_TYPE_COLS.get(db_type, [])
+
+        # Also dynamically include any columns that start with the type prefix
+        type_prefix = db_type.rstrip('_') + '_'
+        for c in cols:
+            if c.startswith(type_prefix) and c not in expected_cols and c != 'site_id':
+                expected_cols.append(c)
+
         available = [c for c in expected_cols if c in cols]
+        if not available:
+            return {"data": {}}
+
+        select_cols = ", ".join(available)
+        result = db.execute(
+            text(f"SELECT {select_cols} FROM checkout_alternative WHERE site_id = :site_id"),
+            {"site_id": site_id}
+        ).first()
+
+        if not result:
+            return {"data": {}}
 
         data = {}
-        if available:
-            select_cols = ", ".join(available)
-            result = db.execute(
-                text(f"SELECT {select_cols} FROM payment_options WHERE site_id = :site_id"),
-                {"site_id": site_id}
-            ).first()
-
-            if result:
-                for col in available:
-                    val = getattr(result, col, '') or ''
-                    data[col] = str(val)
-
-        # Also try site_options table as fallback
-        if not data:
-            try:
-                option_key = option_type.replace('-', '_')
-                result = db.execute(text(
-                    "SELECT option_name, option_value FROM site_options "
-                    "WHERE site_id = :site_id AND option_type = :option_type"
-                ), {"site_id": site_id, "option_type": f"checkout_{option_key}"}).fetchall()
-                for row in result:
-                    data[row[0]] = row[1] or ''
-            except Exception:
-                pass
+        for col in available:
+            val = getattr(result, col, '') or ''
+            data[col] = str(val)
 
         return {"data": data}
 
@@ -117,40 +115,25 @@ def save_checkout_options(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Save checkout options for a given type."""
+    """Save checkout options for a given type to checkout_alternative table."""
     site_id = get_site_id(request)
 
     try:
-        cols = set()
-        try:
-            result = db.execute(text("SHOW COLUMNS FROM payment_options")).fetchall()
-            cols = {row[0] for row in result}
-        except Exception:
-            pass
+        cols = _get_checkout_columns(db)
+        if not cols:
+            raise HTTPException(status_code=500, detail="checkout_alternative table not found")
 
-        expected_cols = CHECKOUT_TYPE_COLS.get(option_type, [])
-
-        # Try to update payment_options table
         updates = []
         params = {"site_id": site_id}
+
         for key, value in options.items():
-            if key in expected_cols and key in cols:
+            if key in cols and key != 'site_id':
                 updates.append(f"{key} = :{key}")
                 params[key] = value
 
         if updates:
-            query = f"UPDATE payment_options SET {', '.join(updates)} WHERE site_id = :site_id"
+            query = f"UPDATE checkout_alternative SET {', '.join(updates)} WHERE site_id = :site_id"
             db.execute(text(query), params)
-            db.commit()
-        else:
-            # Fallback: save to site_options
-            option_key = option_type.replace('-', '_')
-            for key, value in options.items():
-                db.execute(text(
-                    "INSERT INTO site_options (site_id, option_type, option_name, option_value) "
-                    "VALUES (:site_id, :option_type, :key, :value) "
-                    "ON DUPLICATE KEY UPDATE option_value = :value"
-                ), {"site_id": site_id, "option_type": f"checkout_{option_key}", "key": key, "value": value})
             db.commit()
 
         return {"message": f"{option_type} options saved successfully"}

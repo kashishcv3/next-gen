@@ -2,429 +2,320 @@
 
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
-import Cookies from 'js-cookie';
-
-interface PreferencesData {
-  uid: number;
-  username: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone: string;
-  mfa?: {
-    id: number | null;
-    user_id: number;
-    mfa_type: string;
-    is_mfa_set: string;
-  };
-}
 
 export default function PreferencesPage() {
-  const [preferences, setPreferences] = useState<PreferencesData | null>(null);
-  const [editMode, setEditMode] = useState(false);
-  const [editData, setEditData] = useState<Partial<PreferencesData>>({});
-  const [passwordData, setPasswordData] = useState({
-    current_password: '',
-    new_password: '',
-    confirm_password: '',
+  const [profile, setProfile] = useState({
+    username: '',
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone: '',
+    support_email: '',
   });
-  const [mfaSettings, setMfaSettings] = useState({
-    enabled: false,
-    mfa_type: 'email_based',
+  const [passwords, setPasswords] = useState({
+    pw: '',
+    pw1: '',
+    pw2: '',
   });
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaSwitch, setMfaSwitch] = useState('disable');
+  const [mfaType, setMfaType] = useState('email_based');
+  const [resetCode, setResetCode] = useState('');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [uid, setUid] = useState('');
 
   useEffect(() => {
-    fetchPreferences();
+    fetchData();
   }, []);
 
-  const fetchPreferences = async () => {
+  const fetchData = async () => {
     try {
-      setLoading(true);
-      setError(null);
-
-      // Get uid from auth cookie
-      const authUser = Cookies.get('auth_user');
-      if (!authUser) {
-        setError('User not authenticated');
-        setLoading(false);
-        return;
+      const res = await api.get('/accounts/preferences/0');
+      const data = res.data;
+      setProfile({
+        username: data.username || '',
+        first_name: data.first_name || '',
+        last_name: data.last_name || '',
+        email: data.email || '',
+        phone: data.phone || '',
+        support_email: data.support_email || '',
+      });
+      setUid(data.uid || '');
+      if (data.mfa) {
+        const mfaIsSet = data.mfa.is_mfa_set === 'y' || data.mfa.switch === 'enable';
+        setMfaSwitch(mfaIsSet ? 'enable' : 'disable');
+        setMfaType(data.mfa.mfa_type || 'email_based');
+        setResetCode(data.mfa.onetime_reset_code || '');
+        setMfaEnabled(mfaIsSet);
       }
-
-      const userData = JSON.parse(authUser);
-      const uid = userData.uid;
-
-      const response = await api.get(`/accounts/preferences/${uid}`);
-      setPreferences(response.data);
-      setEditData(response.data);
-
-      // Initialize MFA settings
-      if (response.data.mfa) {
-        setMfaSettings({
-          enabled: response.data.mfa.is_mfa_set === 'y',
-          mfa_type: response.data.mfa.mfa_type || 'email_based',
-        });
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') {
+        setError(detail);
+      } else if (Array.isArray(detail)) {
+        setError(detail.map((d: any) => d.msg || JSON.stringify(d)).join(', '));
+      } else {
+        setError('Failed to load preferences');
       }
-    } catch (err) {
-      console.error('Failed to fetch preferences:', err);
-      setError('Failed to load preferences');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleEditChange = (field: string, value: string | boolean) => {
-    setEditData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
-
-  const handlePasswordChange = (field: string, value: string) => {
-    setPasswordData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
-
-  const handleSaveProfile = async () => {
+  const handleProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSuccess(null);
+    setError(null);
     try {
-      setSaving(true);
-      setError(null);
-      await api.put(`/accounts/preferences/${preferences?.uid}`, {
-        first_name: editData.first_name,
-        last_name: editData.last_name,
-        email: editData.email,
-        phone: editData.phone,
+      await api.post('/accounts/update-profile', {
+        ...profile,
+        user_id: uid,
       });
-
-      setPreferences((prev) => (prev ? { ...prev, ...editData } : null));
-      setEditMode(false);
-      setSuccess('Profile updated successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      console.error('Failed to save profile:', err);
-      setError('Failed to save profile changes');
-    } finally {
-      setSaving(false);
+      setSuccess('Profile updated successfully');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to update profile');
     }
   };
 
-  const handleChangePassword = async () => {
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSuccess(null);
     setError(null);
 
-    // Validation
-    if (!passwordData.current_password) {
-      setError('Current password is required');
-      return;
-    }
-    if (!passwordData.new_password) {
-      setError('New password is required');
-      return;
-    }
-    if (passwordData.new_password.length < 8) {
-      setError('New password must be at least 8 characters');
-      return;
-    }
-    if (passwordData.new_password !== passwordData.confirm_password) {
+    if (passwords.pw1 !== passwords.pw2) {
       setError('New passwords do not match');
       return;
     }
 
     try {
-      setSaving(true);
-      await api.post(`/accounts/preferences/${preferences?.uid}/change-password`, {
-        current_password: passwordData.current_password,
-        new_password: passwordData.new_password,
+      await api.post('/accounts/change-password', {
+        ...passwords,
+        user_id: uid,
       });
-
-      setPasswordData({
-        current_password: '',
-        new_password: '',
-        confirm_password: '',
-      });
-      setSuccess('Password changed successfully!');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      console.error('Failed to change password:', err);
-      setError('Failed to change password. Current password may be incorrect.');
-    } finally {
-      setSaving(false);
+      setSuccess('Password changed successfully');
+      setPasswords({ pw: '', pw1: '', pw2: '' });
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to change password');
     }
   };
 
-  const handleToggleMFA = async () => {
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSuccess(null);
+    setError(null);
     try {
-      setSaving(true);
-      setError(null);
-      await api.post(`/accounts/preferences/${preferences?.uid}/mfa`, {
-        enabled: !mfaSettings.enabled,
-        mfa_type: mfaSettings.mfa_type,
+      await api.post('/accounts/mfa-settings', {
+        mfa_switch: mfaSwitch,
+        type_of_mfa: mfaType,
+        one_time_reset_code: resetCode,
+        user_id: uid,
       });
-
-      setMfaSettings((prev) => ({
-        ...prev,
-        enabled: !prev.enabled,
-      }));
-      setSuccess(`MFA ${!mfaSettings.enabled ? 'enabled' : 'disabled'} successfully!`);
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      console.error('Failed to toggle MFA:', err);
-      setError('Failed to update MFA settings');
-    } finally {
-      setSaving(false);
+      setSuccess('MFA settings updated successfully');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to update MFA settings');
     }
+  };
+
+  const generateResetCode = () => {
+    const code = Math.random().toString().substring(2, 8);
+    setResetCode(code);
   };
 
   if (loading) {
     return (
       <div className="container-fluid" style={{ padding: '20px' }}>
-        <div className="alert alert-info">Loading preferences...</div>
-      </div>
-    );
-  }
-
-  if (!preferences) {
-    return (
-      <div className="container-fluid" style={{ padding: '20px' }}>
-        <div className="alert alert-danger">Failed to load preferences</div>
+        <p><i className="fa fa-spinner fa-spin"></i> Loading...</p>
       </div>
     );
   }
 
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
-      <h1>Account Preferences</h1>
+      <div className="row">
+        <div className="col-lg-12">
+          <h1>Preferences</h1>
+        </div>
+      </div>
 
       {error && (
-        <div className="alert alert-danger alert-dismissible" role="alert">
-          <button type="button" className="close" onClick={() => setError(null)}>
-            <span>&times;</span>
-          </button>
-          {error}
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="alert alert-danger">{error}</div>
+          </div>
         </div>
       )}
 
       {success && (
-        <div className="alert alert-success alert-dismissible" role="alert">
-          <button type="button" className="close" onClick={() => setSuccess(null)}>
-            <span>&times;</span>
-          </button>
-          {success}
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="alert alert-success">{success}</div>
+          </div>
         </div>
       )}
 
-      {/* Profile Section */}
-      <div className="panel panel-default" style={{ marginBottom: '20px' }}>
-        <div className="panel-heading">
-          <h3 className="panel-title">Profile Information</h3>
-          {!editMode && (
-            <button
-              className="btn btn-xs btn-primary"
-              onClick={() => setEditMode(true)}
-              style={{ marginLeft: '10px' }}
-            >
-              Edit
+      {/* Profile Settings */}
+      <form onSubmit={handleProfileSubmit}>
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="panel panel-primary">
+              <div className="panel-heading">
+                <h3 className="panel-title"><i className="fa fa-cogs"></i> Profile Settings</h3>
+              </div>
+              <div className="panel-body">
+                <div className="form-group">
+                  <label>Username</label>
+                  <input type="text" className="form-control" disabled value={profile.username} />
+                </div>
+                <div className="form-group">
+                  <label>First Name</label>
+                  <input type="text" className="form-control" maxLength={50} value={profile.first_name} onChange={(e) => setProfile({ ...profile, first_name: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Last Name</label>
+                  <input type="text" className="form-control" maxLength={50} value={profile.last_name} onChange={(e) => setProfile({ ...profile, last_name: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Email</label>
+                  <input type="text" className="form-control" maxLength={50} value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Phone</label>
+                  <input type="text" className="form-control" maxLength={50} value={profile.phone} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Support Email</label>
+                  <input type="text" className="form-control" maxLength={50} value={profile.support_email} onChange={(e) => setProfile({ ...profile, support_email: e.target.value })} />
+                </div>
+              </div>
+            </div>
+            <button type="submit" className="btn btn-primary">
+              <i className="fa fa-save"></i> Update
             </button>
-          )}
+          </div>
         </div>
-        <div className="panel-body">
-          <div className="row">
-            <div className="col-md-6">
-              <div className="form-group">
-                <label>Username</label>
-                <p className="form-control-static">{preferences.username}</p>
+      </form>
+
+      <br /><br />
+
+      {/* Multi-Factor Authentication */}
+      <form onSubmit={handleMfaSubmit}>
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="panel panel-primary">
+              <div className="panel-heading">
+                <h3 className="panel-title"><i className="fa fa-cogs"></i> Multi-Factor Authentication</h3>
               </div>
-            </div>
-            <div className="col-md-6">
-              <div className="form-group">
-                <label>Email</label>
-                {editMode ? (
-                  <input
-                    type="email"
-                    className="form-control"
-                    value={editData.email || ''}
-                    onChange={(e) => handleEditChange('email', e.target.value)}
-                  />
-                ) : (
-                  <p className="form-control-static">{preferences.email}</p>
+              <div className="panel-body">
+                <div className="form-group">
+                  <div className="btn-group">
+                    <button
+                      type="button"
+                      className={`btn btn-primary ${mfaSwitch === 'enable' ? 'active' : ''}`}
+                      onClick={() => setMfaSwitch('enable')}
+                    >
+                      Enable
+                    </button>
+                    &nbsp;
+                    <button
+                      type="button"
+                      className={`btn btn-primary ${mfaSwitch === 'disable' ? 'active' : ''}`}
+                      onClick={() => setMfaSwitch('disable')}
+                    >
+                      Disable
+                    </button>
+                  </div>
+                </div>
+
+                {mfaSwitch === 'enable' && (
+                  <>
+                    <div className="form-group">
+                      <label>To enable please choose between email or auth based MFA.</label>
+                      <div className="btn-group">
+                        <button
+                          type="button"
+                          className={`btn btn-primary ${mfaType === 'email_based' ? 'active' : ''}`}
+                          onClick={() => setMfaType('email_based')}
+                        >
+                          Email based MFA
+                        </button>
+                        &nbsp;
+                        <button
+                          type="button"
+                          className={`btn btn-primary ${mfaType === 'auth_based' ? 'active' : ''}`}
+                          onClick={() => setMfaType('auth_based')}
+                        >
+                          Auth code based MFA
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label>One Time Reset Code</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        readOnly
+                        value={resetCode}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ marginTop: '5px' }}
+                        onClick={generateResetCode}
+                      >
+                        Generate Reset Code
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             </div>
-          </div>
-
-          <div className="row">
-            <div className="col-md-6">
-              <div className="form-group">
-                <label>First Name</label>
-                {editMode ? (
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={editData.first_name || ''}
-                    onChange={(e) => handleEditChange('first_name', e.target.value)}
-                  />
-                ) : (
-                  <p className="form-control-static">{preferences.first_name}</p>
-                )}
-              </div>
-            </div>
-            <div className="col-md-6">
-              <div className="form-group">
-                <label>Last Name</label>
-                {editMode ? (
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={editData.last_name || ''}
-                    onChange={(e) => handleEditChange('last_name', e.target.value)}
-                  />
-                ) : (
-                  <p className="form-control-static">{preferences.last_name}</p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label>Phone</label>
-            {editMode ? (
-              <input
-                type="tel"
-                className="form-control"
-                value={editData.phone || ''}
-                onChange={(e) => handleEditChange('phone', e.target.value)}
-              />
-            ) : (
-              <p className="form-control-static">{preferences.phone}</p>
-            )}
-          </div>
-
-          {editMode && (
-            <div style={{ marginTop: '15px' }}>
-              <button
-                className="btn btn-success"
-                onClick={handleSaveProfile}
-                disabled={saving}
-              >
-                {saving ? 'Saving...' : 'Save Changes'}
-              </button>
-              <button
-                className="btn btn-default"
-                onClick={() => {
-                  setEditMode(false);
-                  setEditData(preferences);
-                }}
-                style={{ marginLeft: '10px' }}
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* MFA Section */}
-      <div className="panel panel-default" style={{ marginBottom: '20px' }}>
-        <div className="panel-heading">
-          <h3 className="panel-title">Two-Factor Authentication</h3>
-        </div>
-        <div className="panel-body">
-          <div className="form-group">
-            <label>MFA Status</label>
-            <p>
-              <span className={`label ${mfaSettings.enabled ? 'label-success' : 'label-default'}`}>
-                {mfaSettings.enabled ? 'Enabled' : 'Disabled'}
-              </span>
-            </p>
-          </div>
-
-          {mfaSettings.enabled && (
-            <div className="form-group">
-              <label>MFA Type</label>
-              <select
-                className="form-control"
-                value={mfaSettings.mfa_type}
-                onChange={(e) =>
-                  setMfaSettings((prev) => ({
-                    ...prev,
-                    mfa_type: e.target.value,
-                  }))
-                }
-                style={{ width: '300px' }}
-              >
-                <option value="email_based">Email Based</option>
-                <option value="auth_based">Authenticator App</option>
-              </select>
-            </div>
-          )}
-
-          <button
-            className={`btn ${mfaSettings.enabled ? 'btn-danger' : 'btn-success'}`}
-            onClick={handleToggleMFA}
-            disabled={saving}
-          >
-            {saving ? 'Updating...' : mfaSettings.enabled ? 'Disable MFA' : 'Enable MFA'}
-          </button>
-        </div>
-      </div>
-
-      {/* Password Change Section */}
-      <div className="panel panel-default">
-        <div className="panel-heading">
-          <h3 className="panel-title">Change Password</h3>
-        </div>
-        <div className="panel-body">
-          <div className="row">
-            <div className="col-md-6">
-              <div className="form-group">
-                <label htmlFor="current_password">Current Password</label>
-                <input
-                  type="password"
-                  className="form-control"
-                  id="current_password"
-                  value={passwordData.current_password}
-                  onChange={(e) => handlePasswordChange('current_password', e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="new_password">New Password</label>
-                <input
-                  type="password"
-                  className="form-control"
-                  id="new_password"
-                  value={passwordData.new_password}
-                  onChange={(e) => handlePasswordChange('new_password', e.target.value)}
-                />
-                <small className="form-text text-muted">Minimum 8 characters</small>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="confirm_password">Confirm New Password</label>
-                <input
-                  type="password"
-                  className="form-control"
-                  id="confirm_password"
-                  value={passwordData.confirm_password}
-                  onChange={(e) => handlePasswordChange('confirm_password', e.target.value)}
-                />
-              </div>
-
-              <button
-                className="btn btn-primary"
-                onClick={handleChangePassword}
-                disabled={saving}
-              >
-                {saving ? 'Updating...' : 'Change Password'}
-              </button>
-            </div>
+            <button type="submit" className="btn btn-primary">
+              <i className="fa fa-shield"></i> Update MFA Settings
+            </button>
           </div>
         </div>
-      </div>
+      </form>
+
+      <br /><br />
+
+      {/* Change Password */}
+      <form onSubmit={handlePasswordSubmit}>
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="panel panel-primary">
+              <div className="panel-heading">
+                <h3 className="panel-title"><i className="fa fa-cogs"></i> Change Password</h3>
+              </div>
+              <div className="panel-body">
+                <p><span className="label label-warning">Note</span> Password must include at least one lowercase letter, one uppercase letter, one number and one special character and have a minimum of 12 characters. Passwords expire every 90 days for PCI Compliance.</p>
+                <br />
+                <div className="form-group">
+                  <label>Username</label>
+                  <input type="text" className="form-control" disabled value={profile.username} />
+                </div>
+                <div className="form-group">
+                  <label>Password</label>
+                  <input type="password" className="form-control" maxLength={50} value={passwords.pw} onChange={(e) => setPasswords({ ...passwords, pw: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>New Password</label>
+                  <input type="password" className="form-control" maxLength={50} value={passwords.pw1} onChange={(e) => setPasswords({ ...passwords, pw1: e.target.value })} />
+                </div>
+                <div className="form-group">
+                  <label>Confirm New Password</label>
+                  <input type="password" className="form-control" maxLength={50} value={passwords.pw2} onChange={(e) => setPasswords({ ...passwords, pw2: e.target.value })} />
+                </div>
+              </div>
+            </div>
+            <button type="submit" className="btn btn-primary">
+              <i className="fa fa-key"></i> Change Password
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
   );
 }

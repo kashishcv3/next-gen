@@ -3,156 +3,161 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-interface WholesaleMember {
-  id: number;
+interface NewWholesaler {
+  ws_id: number;
   company_name: string;
-  contact_email: string;
-  contact_phone: string | null;
-  status: string;
-  created_at: string | null;
+  contact_first_name: string;
+  contact_last_name: string;
+  billing_city: string;
+  billing_state: string;
 }
 
 export default function ApproveWholesalersPage() {
-  const [members, setMembers] = useState<WholesaleMember[]>([]);
+  const [newList, setNewList] = useState<NewWholesaler[]>([]);
+  const [count, setCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [approveIds, setApproveIds] = useState<Set<number>>(new Set());
 
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     try {
+      setLoading(true);
       const res = await api.get('/wholesale/approve');
-      setMembers(res.data.data || []);
+      setNewList(res.data.data || []);
+      setCount(res.data.count || 0);
+      setApproveIds(new Set());
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load pending wholesalers');
+      setError(err.response?.data?.detail || 'Failed to load new wholesalers');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleApprove = async (id: number) => {
-    setActionLoading(id); setError(null);
+  const toggleApprove = (wsId: number) => {
+    const next = new Set(approveIds);
+    if (next.has(wsId)) next.delete(wsId); else next.add(wsId);
+    setApproveIds(next);
+  };
+
+  const handleApprove = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (approveIds.size === 0) {
+      setError('Please select at least one wholesaler to approve');
+      return;
+    }
+    setError(null); setSuccess(null);
     try {
-      await api.post(`/wholesale/approve/${id}`);
-      setSuccess('Wholesaler approved successfully');
-      setTimeout(() => setSuccess(null), 3000);
+      await api.post('/wholesale/approve', { ws_ids: Array.from(approveIds) });
+      setSuccess(`${approveIds.size} wholesaler(s) approved successfully`);
       fetchData();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to approve');
-    } finally {
-      setActionLoading(null);
+      setError(err.response?.data?.detail || 'Failed to approve wholesalers');
     }
   };
 
-  const handleReject = async (id: number) => {
-    setActionLoading(id); setError(null);
-    try {
-      await api.post(`/wholesale/reject/${id}`);
-      setSuccess('Wholesaler rejected');
-      setTimeout(() => setSuccess(null), 3000);
-      fetchData();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to reject');
-    } finally {
-      setActionLoading(null);
-    }
+  const openView = (wsId: number) => {
+    window.open(`/dashboard/wholesale/view/${wsId}`, 'popup', 'width=400,height=500,statusbar=no,toolbars=no,location=no,scrollbars=yes');
   };
 
   return (
-    <div className="container-fluid" style={{ padding: '20px' }}>
-      <div className="row">
-        <div className="col-lg-12">
-          <h1><i className="fa fa-check-circle" style={{ color: '#5cb85c' }}></i> Approve Wholesalers</h1>
-          <p className="text-muted">Review and approve or reject wholesale customer applications.</p>
-        </div>
-      </div>
+    <div className="container-fluid" style={{padding:'20px'}}>
+      <div className="row"><div className="col-lg-12">
+        <h1>New Wholesaler Requests</h1>
+      </div></div>
+      <br />
 
-      {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger"><i className="fa fa-exclamation-circle"></i> {error}</div></div></div>}
-      {success && <div className="row"><div className="col-lg-12"><div className="alert alert-success"><i className="fa fa-check-circle"></i> {success}</div></div></div>}
-
-      <div className="row" style={{ marginBottom: '15px' }}>
-        <div className="col-lg-12">
-          <span className="label label-warning" style={{ fontSize: '14px', padding: '6px 12px' }}>
-            <i className="fa fa-clock-o"></i> Pending Applications: {members.length}
-          </span>
-          <button className="btn btn-default btn-sm" onClick={fetchData} style={{ marginLeft: '10px' }}>
-            <i className="fa fa-refresh"></i> Refresh
-          </button>
+      {error && (
+        <div className="alert alert-danger alert-dismissible">
+          <button type="button" className="close" onClick={() => setError(null)}>&times;</button>
+          {error}
         </div>
-      </div>
-
-      {loading ? (
-        <div className="text-center" style={{ padding: '40px' }}>
-          <i className="fa fa-spinner fa-spin fa-2x"></i>
-          <p style={{ marginTop: '10px' }}>Loading pending applications...</p>
+      )}
+      {success && (
+        <div className="alert alert-success alert-dismissible">
+          <button type="button" className="close" onClick={() => setSuccess(null)}>&times;</button>
+          {success}
         </div>
-      ) : (
-        <div className="row">
-          <div className="col-lg-12">
-            <div className="panel panel-default">
-              <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: '2px solid #5cb85c' }}>
-                <h3 className="panel-title">
-                  <i className="fa fa-briefcase" style={{ color: '#5cb85c', marginRight: '8px' }}></i>
-                  Pending Wholesale Applications
-                </h3>
-              </div>
-              <div className="panel-body" style={{ padding: 0 }}>
+      )}
+
+      <p>
+        <i className="fa fa-info-circle"></i> Below you&apos;ll find all new wholesale customer requests.
+        Check the box next to each company you&apos;d like to approve and then click &quot;Approve Wholesalers&quot;.
+        Click a company name to view details. Click the edit icon to modify a wholesaler&apos;s information,
+        or click the delete icon to remove the request.
+      </p>
+      <br />
+
+      {loading && <p><i className="fa fa-spinner fa-spin"></i> Loading...</p>}
+
+      {!loading && (
+        <form onSubmit={handleApprove}>
+          <div className="row"><div className="col-lg-12">
+            {count > 0 ? (
+              <div className="well" style={{background:'none'}}>
                 <div className="table-responsive">
-                  <table className="table table-hover table-striped" style={{ marginBottom: 0 }}>
+                  <table className="table table-hover table-striped cv3-data-table">
                     <thead>
-                      <tr style={{ background: '#f9f9f9' }}>
-                        <th style={{ fontWeight: 600 }}>ID</th>
-                        <th style={{ fontWeight: 600 }}>Company Name</th>
-                        <th style={{ fontWeight: 600 }}>Contact Email</th>
-                        <th style={{ fontWeight: 600 }}>Phone</th>
-                        <th style={{ fontWeight: 600 }}>Status</th>
-                        <th style={{ fontWeight: 600 }}>Applied</th>
-                        <th style={{ fontWeight: 600, width: '180px' }}>Actions</th>
+                      <tr>
+                        <th className="text-left"><b>Company Name</b></th>
+                        <th className="text-center"><b>Contact</b></th>
+                        <th className="text-center"><b>Location</b></th>
+                        <th className="text-center"><b>Approve</b></th>
+                        <th className="text-center"><b>Actions</b></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {members.length > 0 ? members.map(member => (
-                        <tr key={member.id}>
-                          <td><span className="label label-default">{member.id}</span></td>
-                          <td style={{ fontWeight: 600 }}>{member.company_name}</td>
-                          <td><a href={`mailto:${member.contact_email}`}>{member.contact_email}</a></td>
-                          <td>{member.contact_phone || '—'}</td>
+                      {newList.map((company) => (
+                        <tr key={company.ws_id}>
                           <td>
-                            <span className={`label label-${member.status === 'pending' ? 'warning' : member.status === 'new' ? 'info' : 'default'}`}>
-                              {member.status}
-                            </span>
+                            <a href="#" onClick={(e) => { e.preventDefault(); openView(company.ws_id); }}>
+                              {company.company_name}
+                            </a>
                           </td>
-                          <td>{member.created_at ? new Date(member.created_at).toLocaleDateString() : '—'}</td>
-                          <td>
-                            <button className="btn btn-xs btn-success" style={{ marginRight: '4px' }}
-                              onClick={() => handleApprove(member.id)}
-                              disabled={actionLoading === member.id}>
-                              <i className={`fa ${actionLoading === member.id ? 'fa-spinner fa-spin' : 'fa-check'}`}></i> Approve
-                            </button>
-                            <button className="btn btn-xs btn-danger"
-                              onClick={() => handleReject(member.id)}
-                              disabled={actionLoading === member.id}>
-                              <i className="fa fa-times"></i> Reject
-                            </button>
+                          <td className="text-center">
+                            {company.contact_first_name} {company.contact_last_name}
+                          </td>
+                          <td className="text-center">
+                            {company.billing_city}{company.billing_city && company.billing_state ? ', ' : ''}{company.billing_state}
+                          </td>
+                          <td className="text-center">
+                            <input type="checkbox"
+                              checked={approveIds.has(company.ws_id)}
+                              onChange={() => toggleApprove(company.ws_id)}
+                            />
+                          </td>
+                          <td className="text-center">
+                            <a href={`/dashboard/wholesale/edit/${company.ws_id}`} title="Edit" style={{marginRight:'8px'}}>
+                              <i className="fa fa-pencil"></i>
+                            </a>
+                            <a href="#" onClick={(e) => {
+                              e.preventDefault();
+                              if (window.confirm('Delete this wholesaler request?')) {
+                                api.delete(`/wholesale/wholesaler/${company.ws_id}`).then(() => fetchData());
+                              }
+                            }} title="Delete">
+                              <i className="fa fa-times" style={{color:'red'}}></i>
+                            </a>
                           </td>
                         </tr>
-                      )) : (
-                        <tr>
-                          <td colSpan={7} className="text-center" style={{ padding: '30px', color: '#999' }}>
-                            <i className="fa fa-check-circle fa-2x" style={{ display: 'block', marginBottom: '10px', color: '#5cb85c' }}></i>
-                            No pending wholesale applications. All caught up!
-                          </td>
-                        </tr>
-                      )}
+                      ))}
                     </tbody>
                   </table>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
+            ) : (
+              <p className="text-center">There were no results for your search</p>
+            )}
+          </div></div>
+
+          {count > 0 && (
+            <p>
+              <button type="submit" className="btn btn-primary">Approve Wholesalers</button>
+            </p>
+          )}
+        </form>
       )}
     </div>
   );

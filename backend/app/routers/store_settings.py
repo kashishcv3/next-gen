@@ -19,6 +19,7 @@ from app.dependencies import get_current_user, get_current_admin_user
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel
 import traceback
+from app.utils.db_helpers import build_safe_update
 
 router = APIRouter(prefix="/store-settings", tags=["store-settings"])
 
@@ -300,16 +301,20 @@ def save_general_options(
         }
 
         if existing:
-            set_clause = ", ".join(f"{k} = :{k}" for k in core_fields)
-            db.execute(text(
-                f"UPDATE general_options SET {set_clause} WHERE site_id = :site_id"
-            ), {**core_fields, "site_id": site_id})
+            build_safe_update(db, 'general_options', core_fields, 'site_id', site_id)
         else:
-            cols = ", ".join(["site_id"] + list(core_fields.keys()))
-            vals = ", ".join([":site_id"] + [f":{k}" for k in core_fields])
+            # For insert, also sanitize values
+            from app.utils.db_helpers import get_column_info, sanitize_value_for_column
+            col_info = get_column_info(db, 'general_options')
+            safe_fields = {}
+            for k, v in core_fields.items():
+                if k in col_info:
+                    safe_fields[k] = sanitize_value_for_column(v, col_info[k])
+            cols = ", ".join(["site_id"] + list(safe_fields.keys()))
+            vals = ", ".join([":site_id"] + [f":{k}" for k in safe_fields])
             db.execute(text(
                 f"INSERT INTO general_options ({cols}) VALUES ({vals})"
-            ), {**core_fields, "site_id": site_id})
+            ), {**safe_fields, "site_id": site_id})
 
         db.commit()
         return {"success": True, "message": "General options saved"}
@@ -401,16 +406,19 @@ def save_security_options(
         }
 
         if existing:
-            set_clause = ", ".join(f"{k} = :{k}" for k in security_fields)
-            db.execute(text(
-                f"UPDATE general_options SET {set_clause} WHERE site_id = :site_id"
-            ), {**security_fields, "site_id": site_id})
+            build_safe_update(db, 'general_options', security_fields, 'site_id', site_id)
         else:
-            cols = ", ".join(["site_id"] + list(security_fields.keys()))
-            vals = ", ".join([":site_id"] + [f":{k}" for k in security_fields])
+            from app.utils.db_helpers import get_column_info, sanitize_value_for_column
+            col_info = get_column_info(db, 'general_options')
+            safe_fields = {}
+            for k, v in security_fields.items():
+                if k in col_info:
+                    safe_fields[k] = sanitize_value_for_column(v, col_info[k])
+            cols = ", ".join(["site_id"] + list(safe_fields.keys()))
+            vals = ", ".join([":site_id"] + [f":{k}" for k in safe_fields])
             db.execute(text(
                 f"INSERT INTO general_options ({cols}) VALUES ({vals})"
-            ), {**security_fields, "site_id": site_id})
+            ), {**safe_fields, "site_id": site_id})
 
         # Handle IP restrictions (stored separately or in the same table)
         # The old platform processes ip_from_0..4, ip_to_0..4, ip_0..4

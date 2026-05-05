@@ -3,18 +3,19 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-export default function SmartTransactionPage() {
-  const [options, setOptions] = useState<Record<string, string>>({});
+export default function SmartGiftCardServicePage() {
+  const [data, setData] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  useEffect(() => { fetchOptions(); }, []);
+  useEffect(() => { fetchData(); }, []);
 
-  const fetchOptions = async () => {
+  const fetchData = async () => {
     try {
       const res = await api.get('/orders/gift-card-service/smart');
-      setOptions(res.data.data || res.data || {});
+      setData(res.data.data || {});
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load options');
     } finally {
@@ -22,46 +23,71 @@ export default function SmartTransactionPage() {
     }
   };
 
-  const handleChange = (key: string, value: string) => {
-    setOptions({ ...options, [key]: value });
-  };
+  const handleChange = (key: string, value: string) => setData({ ...data, [key]: value });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSuccess(null); setError(null);
+    setSuccess(null); setError(null); setSaving(true);
     try {
-      await api.post('/orders/gift-card-service/smart', options);
-      setSuccess('Smart Transaction saved successfully');
+      await api.post('/orders/gift-card-service/smart', data);
+      setSuccess('Smart Transaction Systems settings saved successfully');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to save');
+    } finally {
+      setSaving(false);
     }
   };
+
+  const RadioYN = ({ name, label }: { name: string; label: string }) => (
+    <div className="form-group">
+      <label>{label}</label>
+      <div>
+        <div className="btn-group" data-toggle="buttons">
+          <label className={`btn btn-primary ${data[name] === 'y' ? 'active' : ''}`} onClick={() => handleChange(name, 'y')}>
+            <input type="radio" checked={data[name] === 'y'} onChange={() => {}} /> Yes
+          </label>
+          <label className={`btn btn-primary ${data[name] !== 'y' ? 'active' : ''}`} onClick={() => handleChange(name, 'n')}>
+            <input type="radio" checked={data[name] !== 'y'} onChange={() => {}} /> No
+          </label>
+        </div>
+      </div>
+    </div>
+  );
 
   if (loading) return <div className="container-fluid" style={{padding:'20px'}}><p><i className="fa fa-spinner fa-spin"></i> Loading...</p></div>;
 
   return (
     <div className="container-fluid" style={{padding:'20px'}}>
-      <div className="row"><div className="col-lg-12">
-        <h1>Smart Transaction</h1>
-        <p><i className="fa fa-bolt"></i> Configure Smart Transaction gift card service</p>
-      </div></div>
-      {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger">{error}</div></div></div>}
-      {success && <div className="row"><div className="col-lg-12"><div className="alert alert-success">{success}</div></div></div>}
+      <div className="row"><div className="col-lg-12"><h1>Smart Transaction Systems</h1></div></div>
+      <br /><br />
+      {error && <div className="alert alert-danger">{error}</div>}
+      {success && <div className="alert alert-success">{success}</div>}
       <form onSubmit={handleSubmit}>
-        <div className="row"><div className="col-lg-8">
-          <div className="well well-cv3-table">
-            {Object.entries(options).map(([key, value]) => (
-              <div key={key} className="form-group">
-                <label>{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</label>
-                <input type="text" className="form-control" value={value} onChange={(e) => handleChange(key, e.target.value)} />
+        <div className="row"><div className="col-lg-12">
+          <div className="panel panel-primary">
+            <div className="panel-heading"><h3 className="panel-title"><i className="fa fa-cogs"></i> Options</h3></div>
+            <div className="panel-body">
+              <RadioYN name="gift_certificate_processor" label="Process Gift Certificates" />
+              <RadioYN name="st_gift_certificate_create" label="Create Gift Certificates" />
+            </div>
+          </div>
+          <div className="panel panel-primary">
+            <div className="panel-heading"><h3 className="panel-title"><i className="fa fa-cogs"></i> Smart Transaction Systems API Information</h3></div>
+            <div className="panel-body">
+              <div className="form-group">
+                <label>Merchant Number</label>
+                <input type="text" className="form-control" value={data.gift_certificate_merchant || ''} onChange={(e) => handleChange('gift_certificate_merchant', e.target.value)} />
               </div>
-            ))}
-            {Object.keys(options).length === 0 && <p className="text-muted">No options loaded. The backend endpoint may need to be configured.</p>}
+              <div className="form-group">
+                <label>Terminal ID</label>
+                <input type="text" className="form-control" value={data.gift_certificate_terminal || ''} onChange={(e) => handleChange('gift_certificate_terminal', e.target.value)} />
+              </div>
+            </div>
           </div>
         </div></div>
-        <div className="row"><div className="col-lg-8">
-          <button type="submit" className="btn btn-primary"><i className="fa fa-save"></i> Save Options</button>
-        </div></div>
+        <button type="submit" className="btn btn-primary" disabled={saving}>
+          {saving ? <><i className="fa fa-spinner fa-spin"></i> Saving...</> : 'Submit'}
+        </button>
       </form>
     </div>
   );

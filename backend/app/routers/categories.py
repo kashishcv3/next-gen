@@ -534,23 +534,59 @@ def list_category_filters(
 
         store_db = get_store_session(store_db_name)
 
-        query = text("""
-            SELECT DISTINCT filter_id, filter_label, filter_name
-            FROM category_filters
-            WHERE inactive IS NULL OR inactive != 'd'
-            ORDER BY filter_label
-        """)
+        # Try multiple table names for category filters
+        table_name = None
+        for tbl in ["category_filter", "category_filters", "refined_search"]:
+            try:
+                store_db.execute(text(f"SELECT 1 FROM {tbl} LIMIT 1"))
+                table_name = tbl
+                break
+            except Exception:
+                continue
 
-        results = store_db.execute(query).fetchall()
+        if not table_name:
+            return {"filters": [], "total": 0, "message": "No category filters table found"}
 
-        filters = [
-            {
-                "filter_id": r.filter_id,
-                "filter_label": r.filter_label,
-                "filter_name": r.filter_name,
-            }
-            for r in results
-        ]
+        # Discover columns
+        cols = [r[0] for r in store_db.execute(text(f"SHOW COLUMNS FROM {table_name}")).fetchall()]
+
+        id_col = next((c for c in cols if c in ["filter_id", "id", "cat_id"]), cols[0])
+        label_col = next((c for c in cols if c in ["filter_label", "label", "name", "filter_name"]), None)
+        name_col = next((c for c in cols if c in ["filter_name", "name", "field_name"]), None)
+
+        select_cols = [id_col]
+        if label_col and label_col not in select_cols:
+            select_cols.append(label_col)
+        if name_col and name_col not in select_cols:
+            select_cols.append(name_col)
+        # Add remaining cols
+        for c in cols:
+            if c not in select_cols and c not in ["inactive"]:
+                select_cols.append(c)
+
+        where = ""
+        if "inactive" in cols:
+            where = "WHERE inactive IS NULL OR inactive != 'd'"
+
+        order = f"ORDER BY {label_col}" if label_col else f"ORDER BY {id_col}"
+        query = f"SELECT {', '.join(select_cols)} FROM {table_name} {where} {order}"
+        results = store_db.execute(text(query)).fetchall()
+
+        filters = []
+        for r in results:
+            item = {"filter_id": str(getattr(r, id_col))}
+            if label_col:
+                item["filter_label"] = getattr(r, label_col, "") or ""
+            if name_col and name_col != label_col:
+                item["filter_name"] = getattr(r, name_col, "") or ""
+            elif label_col:
+                item["filter_name"] = item.get("filter_label", "")
+            # Add any extra columns
+            for c in select_cols:
+                if c not in [id_col, label_col, name_col]:
+                    val = getattr(r, c, None)
+                    item[c] = str(val) if val is not None else ""
+            filters.append(item)
 
         return {
             "filters": filters,

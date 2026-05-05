@@ -8,7 +8,16 @@ interface StateOption {
   name: string;
 }
 
-export default function AvalaraTaxRateToolPage() {
+const PRODUCT_CODE_OPTIONS = [
+  { value: 'sku', label: 'SKU' },
+  { value: 'generic_1', label: 'Generic 1' },
+  { value: 'generic_2', label: 'Generic 2' },
+  { value: 'generic_3', label: 'Generic 3' },
+  { value: 'generic_4', label: 'Generic 4' },
+  { value: 'generic_5', label: 'Generic 5' },
+];
+
+export default function MachTaxRateToolPage() {
   const [options, setOptions] = useState<Record<string, string>>({});
   const [allStates, setAllStates] = useState<StateOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,13 +34,13 @@ export default function AvalaraTaxRateToolPage() {
 
   const fetchOptions = async () => {
     try {
-      const res = await api.get('/tax/rate-tool/avalara');
+      const res = await api.get('/tax/rate-tool/mach');
       const data = res.data.data || {};
       const states = res.data.states || {};
       setOptions(data);
       setAllStates(Object.entries(states).map(([code, name]) => ({ code, name: name as string })));
 
-      const statesList = data.avatax_states ? data.avatax_states.split('|').filter(Boolean) : [];
+      const statesList = data.cch_states ? data.cch_states.split('|').filter(Boolean) : [];
       setTaxStates(statesList);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load options');
@@ -71,9 +80,9 @@ export default function AvalaraTaxRateToolPage() {
     setSuccess(null); setError(null); setSaving(true);
     try {
       const payload: Record<string, string> = { ...options };
-      payload.avatax_states = taxStates.includes('ALL') ? 'ALL' : taxStates.join('|');
-      await api.post('/tax/rate-tool/avalara', payload);
-      setSuccess('Avalara tax settings saved successfully');
+      payload.cch_states = taxStates.includes('ALL') ? 'ALL' : taxStates.join('|');
+      await api.post('/tax/rate-tool/mach', payload);
+      setSuccess('Mach tax settings saved successfully');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to save');
@@ -100,7 +109,7 @@ export default function AvalaraTaxRateToolPage() {
     <div className="container-fluid" style={{ padding: '20px' }}>
       <div className="row">
         <div className="col-lg-12">
-          <h1>Avalara AvaTax</h1>
+          <h1>CCH Sales Tax SaaS (Mach)</h1>
         </div>
       </div>
       <br />
@@ -120,30 +129,28 @@ export default function AvalaraTaxRateToolPage() {
                 <div className="form-group">
                   <label>Enable API</label>
                   <br />
-                  <RadioYesNo name="avatax_rate_calc" value={options.avatax_rate_calc || 'n'}
-                    onChange={(val) => handleChange('avatax_rate_calc', val)} />
-                  <p><span className="label label-warning">Note</span> Be aware that enabling Avalara will immediately affect your site - the &quot;Test&quot; environment uses Avalara&apos;s sandbox URL and is not recommended for a live store.</p>
+                  <RadioYesNo name="cch_rate_calc" value={options.cch_rate_calc || 'n'}
+                    onChange={(val) => handleChange('cch_rate_calc', val)} />
                 </div>
                 <div className="form-group">
-                  <label>Environment</label>
-                  <br />
-                  <label className="radio-inline">
-                    <input type="radio" name="avatax_environ" value="test"
-                      checked={(options.avatax_environ || 'test') === 'test'}
-                      onChange={() => handleChange('avatax_environ', 'test')} /> Test
-                  </label>
-                  &nbsp;
-                  <label className="radio-inline">
-                    <input type="radio" name="avatax_environ" value="production"
-                      checked={options.avatax_environ === 'production'}
-                      onChange={() => handleChange('avatax_environ', 'production')} /> Production
-                  </label>
+                  <label>Company/Entity ID</label>
+                  <input type="text" className="form-control" value={options.cch_company_id || ''}
+                    onChange={(e) => handleChange('cch_company_id', e.target.value)} />
                 </div>
                 <div className="form-group">
-                  <label>Send Product Name</label>
+                  <label>Product Code Field</label>
+                  <select className="form-control" value={options.cch_product_code || 'sku'}
+                    onChange={(e) => handleChange('cch_product_code', e.target.value)}>
+                    {PRODUCT_CODE_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Post Invoice on Order Complete</label>
                   <br />
-                  <RadioYesNo name="avatax_send_product" value={options.avatax_send_product || 'n'}
-                    onChange={(val) => handleChange('avatax_send_product', val)} />
+                  <RadioYesNo name="cch_post_invoice" value={options.cch_post_invoice || 'n'}
+                    onChange={(val) => handleChange('cch_post_invoice', val)} />
                 </div>
 
                 <div className="form-group">
@@ -200,8 +207,8 @@ export default function AvalaraTaxRateToolPage() {
                   <div style={{ marginTop: '8px' }}>
                     <label>
                       <input type="checkbox" value="y"
-                        checked={options.avatax_tax_states_alt === 'y'}
-                        onChange={(e) => handleChange('avatax_tax_states_alt', e.target.checked ? 'y' : 'n')}
+                        checked={options.cch_tax_states_alt === 'y'}
+                        onChange={(e) => handleChange('cch_tax_states_alt', e.target.checked ? 'y' : 'n')}
                       />&nbsp;Use admin tax settings for remaining states
                     </label>
                   </div>
@@ -209,53 +216,21 @@ export default function AvalaraTaxRateToolPage() {
               </div>
             </div>
 
-            {/* AvaTax API Information Panel */}
+            {/* API Information Panel */}
             <div className="panel panel-primary">
               <div className="panel-heading">
-                <h3 className="panel-title"><i className="fa fa-cogs"></i> AvaTax API Information</h3>
+                <h3 className="panel-title"><i className="fa fa-cogs"></i> Sales Tax SaaS API Information</h3>
               </div>
               <div className="panel-body">
                 <div className="form-group">
-                  <label>Account Number</label>
-                  <input type="text" className="form-control" value={options.avatax_account || ''}
-                    onChange={(e) => handleChange('avatax_account', e.target.value)} />
+                  <label>Username</label>
+                  <input type="text" className="form-control" value={options.cch_user || ''}
+                    onChange={(e) => handleChange('cch_user', e.target.value)} />
                 </div>
                 <div className="form-group">
-                  <label>License Number</label>
-                  <input type="text" className="form-control" value={options.avatax_license || ''}
-                    onChange={(e) => handleChange('avatax_license', e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>Company Code</label>
-                  <input type="text" className="form-control" value={options.avatax_company_code || ''}
-                    onChange={(e) => handleChange('avatax_company_code', e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>Customer Code</label>
-                  <input type="text" className="form-control" value={options.avatax_customer_code || ''}
-                    onChange={(e) => handleChange('avatax_customer_code', e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>How would you like requests communicated to Avalara?</label>
-                  <br />
-                  <label className="radio-inline">
-                    <input type="radio" name="avatax_connection_type" value="tax_only"
-                      checked={(options.avatax_connection_type || 'tax_only') !== 'create_invoice'}
-                      onChange={() => handleChange('avatax_connection_type', 'tax_only')} /> Calculate Tax Only
-                  </label>
-                  &nbsp;
-                  <label className="radio-inline">
-                    <input type="radio" name="avatax_connection_type" value="create_invoice"
-                      checked={options.avatax_connection_type === 'create_invoice'}
-                      onChange={() => handleChange('avatax_connection_type', 'create_invoice')} /> Create &amp; Commit Invoice
-                  </label>
-                </div>
-                <div className="form-group">
-                  <label>Shipping Item Code</label>
-                  <input type="text" className="form-control" value={options.avatax_shipping_sku || ''}
-                    maxLength={20}
-                    onChange={(e) => handleChange('avatax_shipping_sku', e.target.value)} />
-                  <p className="help-block"><i className="fa fa-info-circle"></i> If left blank, will send SHIPPING as the shipping item code</p>
+                  <label>Password</label>
+                  <input type="text" className="form-control" value={options.cch_pass || ''}
+                    onChange={(e) => handleChange('cch_pass', e.target.value)} />
                 </div>
               </div>
             </div>
@@ -267,30 +242,16 @@ export default function AvalaraTaxRateToolPage() {
               </div>
               <div className="panel-body">
                 <div className="form-group">
-                  <label>Address</label>
-                  <input type="text" className="form-control" value={options.avatax_from_address || ''}
-                    onChange={(e) => handleChange('avatax_from_address', e.target.value)} />
+                  <label>Address 1</label>
+                  <input type="text" className="form-control" value={options.cch_address1 || ''}
+                    onChange={(e) => handleChange('cch_address1', e.target.value)} />
+                  <p className="help-block">Ex: 1 Main St STE 103</p>
                 </div>
                 <div className="form-group">
-                  <label>City</label>
-                  <input type="text" className="form-control" value={options.avatax_from_city || ''}
-                    onChange={(e) => handleChange('avatax_from_city', e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>State</label>
-                  <select className="form-control" value={options.avatax_from_state || ''}
-                    onChange={(e) => handleChange('avatax_from_state', e.target.value)}>
-                    <option value="">-- Select State --</option>
-                    {allStates.map(s => (
-                      <option key={s.code} value={s.code}>{s.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Zip Code</label>
-                  <input type="text" className="form-control" value={options.avatax_from_zip || ''}
-                    size={10}
-                    onChange={(e) => handleChange('avatax_from_zip', e.target.value)} />
+                  <label>Address 2</label>
+                  <input type="text" className="form-control" value={options.cch_address2 || ''}
+                    onChange={(e) => handleChange('cch_address2', e.target.value)} />
+                  <p className="help-block">Ex: Colorado Springs, CO 80919</p>
                 </div>
               </div>
             </div>

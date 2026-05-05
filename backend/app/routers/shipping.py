@@ -7,6 +7,7 @@ from app.database import get_db, get_store_db_name, get_store_session
 from app.models.user import User
 from app.dependencies import get_current_admin_user
 from datetime import datetime
+from app.utils.db_helpers import build_safe_update
 
 router = APIRouter(prefix="/shipping", tags=["shipping"])
 
@@ -84,9 +85,6 @@ def save_shipping_options(
     """Save core shipping options to shipping_options table."""
     site_id = get_site_id(request)
     try:
-        cols_result = db.execute(text("SHOW COLUMNS FROM shipping_options")).fetchall()
-        all_cols = {row[0] for row in cols_result}
-
         core_cols = [
             'ship_calc', 'ship_calculator', 'vendor_ship_calc', 'use_ship_on',
             'shipping_type', 'ship_territories', 'ship_apo', 'ship_address_confirm',
@@ -95,17 +93,7 @@ def save_shipping_options(
             'shipworks_enable', 'shipworks_statuscodes', 'origin_address',
         ]
 
-        updates = []
-        params = {"site_id": site_id}
-        for key, value in options.items():
-            if key in core_cols and key in all_cols:
-                updates.append(f"`{key}` = :{key}")
-                params[key] = value
-
-        if updates:
-            query = f"UPDATE shipping_options SET {', '.join(updates)} WHERE site_id = :site_id"
-            db.execute(text(query), params)
-            db.commit()
+        build_safe_update(db, 'shipping_options', options, 'site_id', site_id, allowed_cols=core_cols)
 
         return {"message": "Shipping options saved successfully"}
     except Exception as e:
@@ -686,13 +674,45 @@ def delete_dimensional_box(
 # =========================================
 # SHIPPING RATE TOOLS
 # =========================================
-RATE_TOOL_PREFIXES = {
-    'custom': ['custom_shipping', 'custom_rate'],
-    'ups': ['ups_'],
-    'fedex': ['fedex_'],
-    'usps': ['usps_'],
-    'abf': ['abf_'],
-    'conway': ['conway_', 'xpo_'],
+# Explicit field lists per carrier matching the old platform exactly
+RATE_TOOL_FIELDS = {
+    'custom': [
+        'api_calc', 'ship_url', 'use_for_tax_calc', 'ship_post_type',
+        'custom_shipping_api_version', 'custom_shipping_api_username',
+        'custom_shipping_api_password', 'custom_shipping_api_key',
+    ],
+    'ups': [
+        'rate_calc', 'excl_address', 'ship_from_zip', 'calc_type', 'num_per_box',
+        'ship_type', 'min_ups', 'ups_rate_type', 'ups_time_in_transit',
+        'ups_transit_fixed', 'ups_freight_user', 'ups_freight_password',
+        'ups_freight_access_key', 'ups_freight_ship_num',
+        'ups_freight_client_id', 'ups_freight_client_secret',
+        'ups_freight_default_auth',
+    ],
+    'fedex': [
+        'fedex_rate_calc', 'fedex_valadd', 'fedex_server', 'fedex_ship_type',
+        'fedex_calc_type', 'fedex_num_per_box', 'fedex_min',
+        'fedex_discount_to_net', 'fedex_transit_time',
+        'fedex_rest_default_auth',
+        'fedex_account_key', 'fedex_account_pass', 'fedex_account_num', 'fedex_meter_num',
+        'fedex_rest_client_id', 'fedex_rest_client_secret',
+        'fedex_from_state', 'fedex_ship_from_zip', 'fedex_from_country',
+        'fedex_freight_account_num', 'fedex_freight_address', 'fedex_freight_address2',
+        'fedex_freight_city', 'fedex_freight_state', 'fedex_freight_zip',
+        'fedex_freight_country', 'fedex_freight_from',
+    ],
+    'usps': [
+        'usps_rate_calc', 'usps_user_id', 'usps_live', 'usps_ship_from_zip',
+        'usps_calc_type', 'usps_num_per_box', 'usps_min',
+    ],
+    'abf': [
+        'abf_rate_calc', 'abf_min', 'abf_acct_num', 'abf_pass',
+        'abf_from_city', 'abf_from_state', 'abf_from_zip', 'abf_from_country',
+    ],
+    'conway': [
+        'cw_rate_calc', 'cw_min', 'cw_customer_num', 'cw_user', 'cw_pass',
+        'cw_from_zip', 'cw_from_country',
+    ],
 }
 
 
@@ -706,6 +726,9 @@ def get_shipping_rate_tool(
     """Get shipping rate tool options for a specific provider."""
     site_id = get_site_id(request)
 
+    if provider not in RATE_TOOL_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+
     try:
         try:
             cols_result = db.execute(text("SHOW COLUMNS FROM shipping_options")).fetchall()
@@ -713,25 +736,12 @@ def get_shipping_rate_tool(
         except Exception:
             return {"data": {}}
 
-        prefixes = RATE_TOOL_PREFIXES.get(provider, [provider])
-        relevant_cols = []
-        for col in all_cols:
-            if col in ('site_id', 'id'):
-                continue
-            col_lower = col.lower()
-            for prefix in prefixes:
-                if col_lower.startswith(prefix.lower()):
-                    relevant_cols.append(col)
-                    break
-
-        if not relevant_cols and provider == 'custom':
-            standard_prefixes = ['ups_', 'fedex_', 'usps_', 'abf_', 'conway_', 'xpo_',
-                                 'shipworks', 'origin_', 'include_', 'dimensional']
-            relevant_cols = [c for c in all_cols if c not in ('site_id', 'id') and
-                           not any(c.lower().startswith(p) for p in standard_prefixes)]
+        # Use explicit field list, filtered to columns that actually exist
+        relevant_cols = [c for c in RATE_TOOL_FIELDS[provider] if c in all_cols]
 
         if not relevant_cols:
-            return {"data": {}}
+            # Return empty defaults for all expected fields
+            return {"data": {c: '' for c in RATE_TOOL_FIELDS[provider]}}
 
         select_cols = ", ".join(f"`{c}`" for c in relevant_cols)
         result = db.execute(
@@ -740,16 +750,19 @@ def get_shipping_rate_tool(
         ).first()
 
         if not result:
-            return {"data": {}}
+            return {"data": {c: '' for c in RATE_TOOL_FIELDS[provider]}}
 
         data = {}
-        for col in relevant_cols:
-            val = getattr(result, col, '') or ''
-            data[col] = str(val)
+        for col in RATE_TOOL_FIELDS[provider]:
+            if col in relevant_cols:
+                val = getattr(result, col, '') or ''
+                data[col] = str(val)
+            else:
+                data[col] = ''
         return {"data": data}
 
     except Exception as e:
-        return {"data": {}}
+        return {"data": {c: '' for c in RATE_TOOL_FIELDS[provider]}}
 
 
 @router.post("/rate-tool/{provider}")
@@ -763,17 +776,21 @@ def save_shipping_rate_tool(
     """Save shipping rate tool options for a specific provider."""
     site_id = get_site_id(request)
 
+    if provider not in RATE_TOOL_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+
     try:
         try:
             cols_result = db.execute(text("SHOW COLUMNS FROM shipping_options")).fetchall()
-            col_types = {row[0]: str(row[1]).lower() for row in cols_result}
+            all_cols = {row[0] for row in cols_result}
         except Exception:
             raise HTTPException(status_code=500, detail="shipping_options table not found")
 
+        allowed_fields = set(RATE_TOOL_FIELDS[provider])
         updates = []
         params = {"site_id": site_id}
         for key, value in options.items():
-            if key == 'site_id' or key not in col_types:
+            if key == 'site_id' or key not in all_cols or key not in allowed_fields:
                 continue
             updates.append(f"`{key}` = :{key}")
             params[key] = value if value != '' else None

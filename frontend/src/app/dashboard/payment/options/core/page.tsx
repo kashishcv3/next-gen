@@ -3,8 +3,16 @@
 import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
+interface PaymentMethodOption {
+  value: string;
+  label: string;
+}
+
 export default function CorePaymentOptionsPage() {
-  const [options, setOptions] = useState<Record<string, string>>({});
+  const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
+  const [paymentMembersOnly, setPaymentMembersOnly] = useState(false);
+  const [paypalRedirectToPpx, setPaypalRedirectToPpx] = useState('n');
+  const [methodOptions, setMethodOptions] = useState<PaymentMethodOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -15,7 +23,28 @@ export default function CorePaymentOptionsPage() {
   const fetchOptions = async () => {
     try {
       const res = await api.get('/payment/options/core');
-      setOptions(res.data.data || res.data || {});
+      const data = res.data.data || {};
+      const opts = res.data.payment_method_options || {};
+
+      // Build method options list
+      const optList: PaymentMethodOption[] = Object.entries(opts).map(([value, label]) => ({
+        value,
+        label: label as string,
+      }));
+      setMethodOptions(optList);
+
+      // Parse current payment methods (comma-separated string)
+      const methods = data.payment_methods
+        ? data.payment_methods.split(',').map((m: string) => m.trim()).filter(Boolean)
+        : [];
+      setPaymentMethods(methods);
+
+      // Parse members only checkbox
+      const mo = (data.payment_members_only || '').toLowerCase();
+      setPaymentMembersOnly(mo === 'y' || mo === '1' || mo === 'yes');
+
+      // Parse paypal redirect
+      setPaypalRedirectToPpx(data.paypal_redirect_to_ppx || 'n');
     } catch (err: any) {
       const d = err.response?.data?.detail;
       setError(typeof d === 'string' ? d : (Array.isArray(d) ? d.map((x: any) => x.msg).join(', ') : 'Failed to load options'));
@@ -24,15 +53,16 @@ export default function CorePaymentOptionsPage() {
     }
   };
 
-  const handleChange = (key: string, value: string) => {
-    setOptions(prev => ({ ...prev, [key]: value }));
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSuccess(null); setError(null); setSaving(true);
     try {
-      await api.post('/payment/options/core', options);
+      const payload: Record<string, string> = {
+        payment_methods: paymentMethods.join(','),
+        payment_members_only: paymentMembersOnly ? 'y' : 'n',
+        paypal_redirect_to_ppx: paypalRedirectToPpx,
+      };
+      await api.post('/payment/options/core', payload);
       setSuccess('Core payment options saved successfully');
       setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
@@ -43,82 +73,14 @@ export default function CorePaymentOptionsPage() {
     }
   };
 
-  const labelMap: Record<string, string> = {
-    payment_members_only: 'Members-Only Payment Methods',
-    payment_methods: 'Accepted Payment Methods',
-    paypal_redirect_to_ppx: 'PayPal Express Checkout Redirect',
-  };
-
-  const descriptionMap: Record<string, string> = {
-    payment_members_only: 'Only allow registered members to use payment methods other than credit card.',
-    payment_methods: 'Choose the payment methods you accept. Multiple methods can be comma-separated (e.g. "Credit Card,PayPal,Check").',
-    paypal_redirect_to_ppx: 'Redirect PayPal standard transactions to PayPal Express Checkout flow.',
-  };
-
-  const yesNoFields = ['payment_members_only', 'paypal_redirect_to_ppx'];
-
-  const renderToggle = (key: string) => {
-    const value = options[key] ?? '';
-    const isYes = value.toLowerCase() === 'y' || value === '1' || value.toLowerCase() === 'yes';
-    const label = labelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-    const desc = descriptionMap[key];
-
-    return (
-      <div key={key} style={{ marginBottom: '18px', padding: '12px', background: '#f9f9f9', borderRadius: '4px', border: '1px solid #eee' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <label style={{ fontWeight: 600, marginBottom: '2px', display: 'block' }}>{label}</label>
-            {desc && <small className="text-muted">{desc}</small>}
-          </div>
-          <div
-            onClick={() => handleChange(key, isYes ? 'n' : 'y')}
-            style={{
-              width: '52px', height: '28px', borderRadius: '14px', cursor: 'pointer',
-              background: isYes ? '#5cb85c' : '#ccc', position: 'relative', transition: 'background 0.2s',
-              flexShrink: 0, marginLeft: '16px',
-            }}
-          >
-            <div style={{
-              width: '22px', height: '22px', borderRadius: '50%', background: '#fff',
-              position: 'absolute', top: '3px', left: isYes ? '27px' : '3px',
-              transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-            }} />
-          </div>
-        </div>
-        <div style={{ marginTop: '4px' }}>
-          <span className={`label label-${isYes ? 'success' : 'default'}`} style={{ fontSize: '11px' }}>
-            {isYes ? 'Enabled' : 'Disabled'}
-          </span>
-        </div>
-      </div>
-    );
-  };
-
-  const renderTextInput = (key: string) => {
-    const value = options[key] ?? '';
-    const label = labelMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-    const desc = descriptionMap[key];
-
-    return (
-      <div key={key} className="form-group" style={{ marginBottom: '18px' }}>
-        <label style={{ fontWeight: 600 }}>{label}</label>
-        {desc && <div><small className="text-muted">{desc}</small></div>}
-        <input type="text" className="form-control" value={value}
-          onChange={(e) => handleChange(key, e.target.value)}
-          style={{ maxWidth: '500px', marginTop: '4px' }} />
-      </div>
-    );
-  };
+  // Check if both paypal and paypal_express are selected
+  const showPaypalRedirect = paymentMethods.includes('paypal') && paymentMethods.includes('paypal_express');
 
   if (loading) return (
     <div className="container-fluid" style={{ padding: '20px' }}>
       <p><i className="fa fa-spinner fa-spin"></i> Loading payment options...</p>
     </div>
   );
-
-  // Separate toggle fields from text fields
-  const toggleKeys = Object.keys(options).filter(k => yesNoFields.includes(k));
-  const textKeys = Object.keys(options).filter(k => !yesNoFields.includes(k));
 
   return (
     <div className="container-fluid" style={{ padding: '20px' }}>
@@ -129,51 +91,107 @@ export default function CorePaymentOptionsPage() {
         </div>
       </div>
 
-      {error && <div className="row"><div className="col-lg-12"><div className="alert alert-danger"><i className="fa fa-exclamation-circle"></i> {error}</div></div></div>}
-      {success && <div className="row"><div className="col-lg-12"><div className="alert alert-success"><i className="fa fa-check-circle"></i> {success}</div></div></div>}
+      {error && (
+        <div className="row"><div className="col-lg-12">
+          <div className="alert alert-danger"><i className="fa fa-exclamation-circle"></i> {error}</div>
+        </div></div>
+      )}
+      {success && (
+        <div className="row"><div className="col-lg-12">
+          <div className="alert alert-success"><i className="fa fa-check-circle"></i> {success}</div>
+        </div></div>
+      )}
 
       <form onSubmit={handleSubmit}>
         <div className="row">
           <div className="col-lg-9">
-            {/* Payment Methods Section */}
-            {textKeys.length > 0 && (
-              <div className="panel panel-default" style={{ marginBottom: '20px' }}>
-                <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: '2px solid #337ab7' }}>
-                  <h3 className="panel-title">
-                    <i className="fa fa-money" style={{ color: '#337ab7', marginRight: '8px' }}></i>
+            <div className="panel panel-primary">
+              <div className="panel-heading">
+                <h3 className="panel-title">Options</h3>
+              </div>
+              <div className="panel-body">
+
+                {/* Payment Methods - Multi-select */}
+                <div className="form-group" style={{ marginBottom: '20px' }}>
+                  <label style={{ fontWeight: 600, marginBottom: '6px', display: 'block' }}>
                     Payment Methods
-                  </h3>
-                  <small className="text-muted">Configure which payment methods are accepted.</small>
+                  </label>
+                  <select
+                    multiple
+                    className="form-control"
+                    value={paymentMethods}
+                    onChange={(e) => {
+                      const selected = Array.from(e.target.selectedOptions, opt => opt.value);
+                      setPaymentMethods(selected);
+                    }}
+                    style={{ height: '220px', maxWidth: '400px' }}
+                  >
+                    {methodOptions.map(opt => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                  <small className="text-muted" style={{ display: 'block', marginTop: '4px' }}>
+                    Hold Ctrl (Cmd on Mac) to select multiple methods.
+                  </small>
                 </div>
-                <div className="panel-body">
-                  {textKeys.map(k => renderTextInput(k))}
-                </div>
-              </div>
-            )}
 
-            {/* Toggle Settings Section */}
-            {toggleKeys.length > 0 && (
-              <div className="panel panel-default" style={{ marginBottom: '20px' }}>
-                <div className="panel-heading" style={{ background: '#f5f5f5', borderBottom: '2px solid #5cb85c' }}>
-                  <h3 className="panel-title">
-                    <i className="fa fa-toggle-on" style={{ color: '#5cb85c', marginRight: '8px' }}></i>
-                    Payment Settings
-                  </h3>
-                  <small className="text-muted">Enable or disable payment features.</small>
+                {/* Members Only - Checkbox */}
+                <div className="form-group" style={{ marginBottom: '20px' }}>
+                  <div className="checkbox">
+                    <label style={{ fontWeight: 400 }}>
+                      <input
+                        type="checkbox"
+                        checked={paymentMembersOnly}
+                        onChange={(e) => setPaymentMembersOnly(e.target.checked)}
+                      />
+                      {' '}Members-Only Payment Methods
+                    </label>
+                  </div>
+                  <small className="text-muted">
+                    Only allow registered members to use payment methods other than credit card.
+                  </small>
                 </div>
-                <div className="panel-body">
-                  {toggleKeys.map(k => renderToggle(k))}
-                </div>
-              </div>
-            )}
 
-            {Object.keys(options).length === 0 && (
-              <div className="panel panel-default">
-                <div className="panel-body">
-                  <p className="text-muted text-center"><i className="fa fa-info-circle"></i> No core payment options found for this store.</p>
-                </div>
+                {/* PayPal Redirect - Conditional, only show when both paypal and paypal_express selected */}
+                {showPaypalRedirect ? (
+                  <div className="form-group" style={{ marginBottom: '20px', padding: '12px', background: '#f9f9f9', borderRadius: '4px', border: '1px solid #eee' }}>
+                    <label style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>
+                      PayPal Express Checkout Redirect
+                    </label>
+                    <small className="text-muted" style={{ display: 'block', marginBottom: '10px' }}>
+                      When a customer selects PayPal as their payment method, redirect them to use PayPal Express Checkout instead.
+                    </small>
+                    <div className="radio" style={{ marginBottom: '4px' }}>
+                      <label>
+                        <input
+                          type="radio"
+                          name="paypal_redirect_to_ppx"
+                          value="y"
+                          checked={paypalRedirectToPpx.toLowerCase() === 'y'}
+                          onChange={() => setPaypalRedirectToPpx('y')}
+                        />
+                        {' '}Yes
+                      </label>
+                    </div>
+                    <div className="radio">
+                      <label>
+                        <input
+                          type="radio"
+                          name="paypal_redirect_to_ppx"
+                          value="n"
+                          checked={paypalRedirectToPpx.toLowerCase() !== 'y'}
+                          onChange={() => setPaypalRedirectToPpx('n')}
+                        />
+                        {' '}No
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
               </div>
-            )}
+            </div>
           </div>
         </div>
 
@@ -181,7 +199,8 @@ export default function CorePaymentOptionsPage() {
           <div className="col-lg-9">
             <div style={{ borderTop: '1px solid #eee', paddingTop: '15px' }}>
               <button type="submit" className="btn btn-primary btn-lg" disabled={saving}>
-                <i className={`fa ${saving ? 'fa-spinner fa-spin' : 'fa-save'}`}></i> {saving ? 'Saving...' : 'Save Payment Options'}
+                <i className={`fa ${saving ? 'fa-spinner fa-spin' : 'fa-save'}`}></i>{' '}
+                {saving ? 'Saving...' : 'Save Payment Options'}
               </button>
             </div>
           </div>

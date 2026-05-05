@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
+import csv
+import io
+import codecs
 from app.database import get_db, get_store_db_name, get_store_session
 from app.models.user import User
 from app.dependencies import get_current_user
@@ -720,29 +723,38 @@ def save_fraud_options(
 
 
 # =========================================
-# GIFT CERTIFICATE OPTIONS
+# GIFT CERTIFICATE OPTIONS (from order_options table)
 # =========================================
+GIFT_CERT_OPTION_COLS = [
+    'gift_certificate_delay', 'gift_certificate_fee_amount',
+    'gift_certificate_fee_type', 'gift_certificate_applyshipping',
+    'gift_certificate_applytax', 'gift_certificate_applypromos',
+    'gift_certificate_internal_external', 'gift_certificate_internal_name',
+    'gift_certificate_external_name',
+]
+
+
 @router.get("/options/gift")
 def get_gift_options(
     site_id: int = Query(..., description="Store/site ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get gift certificate options from gift_card_service table."""
+    """Get gift certificate options from order_options table."""
     try:
         try:
-            cols_result = db.execute(text("SHOW COLUMNS FROM gift_card_service")).fetchall()
+            cols_result = db.execute(text("SHOW COLUMNS FROM order_options")).fetchall()
             cols = {row[0] for row in cols_result}
         except Exception:
             return {"data": {}}
 
-        available = [c for c in cols if c != 'site_id']
+        available = [c for c in GIFT_CERT_OPTION_COLS if c in cols]
         if not available:
             return {"data": {}}
 
         select_cols = ", ".join(available)
         result = db.execute(
-            text(f"SELECT {select_cols} FROM gift_card_service WHERE site_id = :site_id"),
+            text(f"SELECT {select_cols} FROM order_options WHERE site_id = :site_id"),
             {"site_id": site_id}
         ).first()
 
@@ -766,14 +778,13 @@ def save_gift_options(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Save gift certificate options to gift_card_service table."""
+    """Save gift certificate options to order_options table."""
     try:
-        col_types = get_table_col_types(db, 'gift_card_service')
-
-        updates, params = build_update_params(options, col_types, site_id)
+        col_types = get_table_col_types(db, 'order_options')
+        updates, params = build_update_params(options, col_types, site_id, allowed_cols=GIFT_CERT_OPTION_COLS)
 
         if updates:
-            query = f"UPDATE gift_card_service SET {', '.join(updates)} WHERE site_id = :site_id"
+            query = f"UPDATE order_options SET {', '.join(updates)} WHERE site_id = :site_id"
             db.execute(text(query), params)
             db.commit()
 
@@ -879,27 +890,39 @@ def save_member_options(
 # =========================================
 # GIFT CARD SERVICE PROVIDERS
 # =========================================
-GIFT_CARD_TABLES = {
-    'custom': 'gift_card_service',
-    'smart': 'gift_card_service',
-    'valutec': 'gift_card_service',
-    'arroweye': 'gift_card_service',
-    'wtg': 'gift_card_service',
-    'aloha': 'gift_card_service',
-    'elavon': 'gift_card_service',
-    'tendercard': 'gift_card_service',
-}
-
-# Column prefixes for each provider
-GIFT_CARD_PREFIXES = {
-    'custom': ['gc_custom', 'custom_gc', 'gift_card_custom', 'gift_custom'],
-    'smart': ['smart_transactions', 'smart_gc', 'gc_smart'],
-    'valutec': ['valutec', 'gc_valutec'],
-    'arroweye': ['arroweye', 'gc_arroweye'],
-    'wtg': ['wtg', 'gc_wtg'],
-    'aloha': ['aloha', 'gc_aloha'],
-    'elavon': ['elavon', 'gc_elavon'],
-    'tendercard': ['tendercard', 'gc_tendercard'],
+# Exact column names per provider from the gift_card_service table
+GIFT_CARD_PROVIDER_COLS = {
+    'custom': [
+        'giftcertws_api', 'giftcertws_url', 'giftcertws_apiversion',
+        'giftcertws_secure', 'giftcertws_username', 'giftcertws_password',
+        'giftcertws_signkey', 'giftcertws_require_pin',
+    ],
+    'smart': [
+        'gift_certificate_processor', 'st_gift_certificate_create',
+        'gift_certificate_merchant', 'gift_certificate_terminal',
+    ],
+    'valutec': [
+        'gcv_version', 'gcv_processor', 'gcv_terminal', 'gcv_server',
+        'gcv_clientkey', 'gcv_create', 'gcv_program', 'gcv_terminal_create',
+    ],
+    'arroweye': [
+        'arroweye_gift_certificates', 'arroweye_greet_card', 'arroweye_gift_card',
+    ],
+    'wtg': [
+        'gcwtg_processor', 'gcwtg_merchant', 'gcwtg_user', 'gcwtg_pw',
+        'gcwtg_product_certs', 'gcwtg_require_pin',
+    ],
+    'aloha': [
+        'gcaloha_processor', 'gcaloha_wsuser', 'gcaloha_user', 'gcaloha_pw',
+        'gcaloha_compid', 'gcaloha_pinverify',
+    ],
+    'elavon': [
+        'elavon_processor', 'elavon_environment', 'elavon_reg_key',
+        'elavon_vendor', 'elavon_terminal', 'elavon_bank_num',
+    ],
+    'tendercard': [
+        'tc_gift_certificate_processor', 'tc_gift_certificate_auth',
+    ],
 }
 
 
@@ -912,33 +935,21 @@ def get_gift_card_service_options(
 ):
     """Get gift card service options for a specific provider."""
     try:
-        # Try the gift_card_service table first
+        provider_cols = GIFT_CARD_PROVIDER_COLS.get(provider)
+        if not provider_cols:
+            return {"data": {}}
+
         try:
             cols_result = db.execute(text("SHOW COLUMNS FROM gift_card_service")).fetchall()
             all_cols = {row[0] for row in cols_result}
         except Exception:
             return {"data": {}}
 
-        # Filter columns relevant to this provider
-        prefixes = GIFT_CARD_PREFIXES.get(provider, [provider])
-        relevant_cols = []
-        for col in all_cols:
-            if col in ('site_id', 'id'):
-                continue
-            col_lower = col.lower()
-            for prefix in prefixes:
-                if prefix.lower() in col_lower:
-                    relevant_cols.append(col)
-                    break
-
-        # If no provider-specific cols found, return all cols (for 'custom' which may use generic names)
-        if not relevant_cols and provider == 'custom':
-            relevant_cols = [c for c in all_cols if c not in ('site_id', 'id')]
-
-        if not relevant_cols:
+        available = [c for c in provider_cols if c in all_cols]
+        if not available:
             return {"data": {}}
 
-        select_cols = ", ".join(f"`{c}`" for c in relevant_cols)
+        select_cols = ", ".join(f"`{c}`" for c in available)
         result = db.execute(
             text(f"SELECT {select_cols} FROM gift_card_service WHERE site_id = :site_id"),
             {"site_id": site_id}
@@ -948,7 +959,7 @@ def get_gift_card_service_options(
             return {"data": {}}
 
         data = {}
-        for col in relevant_cols:
+        for col in available:
             val = getattr(result, col, '') or ''
             data[col] = str(val)
         return {"data": data}
@@ -967,8 +978,12 @@ def save_gift_card_service_options(
 ):
     """Save gift card service options for a specific provider."""
     try:
+        provider_cols = GIFT_CARD_PROVIDER_COLS.get(provider)
+        if not provider_cols:
+            raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+
         col_types = get_table_col_types(db, 'gift_card_service')
-        updates, params = build_update_params(options, col_types, site_id)
+        updates, params = build_update_params(options, col_types, site_id, allowed_cols=provider_cols)
 
         if updates:
             query = f"UPDATE gift_card_service SET {', '.join(updates)} WHERE site_id = :site_id"
@@ -976,9 +991,501 @@ def save_gift_card_service_options(
             db.commit()
 
         return {"message": f"Gift card service ({provider}) options saved successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================
+# GIFT CERTIFICATE EMAILS (Pending)
+# =========================================
+@router.get("/gc-emails")
+def get_pending_gc_emails(
+    site_id: int = Query(..., description="Store/site ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get pending gift certificate emails from hold_emails table."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            return {"data": []}
+
+        store_db = get_store_session(store_db_name)
+
+        # Check if hold_emails table exists
+        try:
+            store_db.execute(text("SELECT 1 FROM hold_emails LIMIT 0"))
+        except Exception:
+            return {"data": []}
+
+        query = """
+            SELECT DISTINCT h.order_id,
+                   DATE_FORMAT(f.date_ordered, '%%m/%%d/%%Y') as date_ordered
+            FROM hold_emails h
+            JOIN full_order f ON h.order_id = f.order_id
+            WHERE h.type = 'gc_send'
+              AND ((f.invalid != 'y' AND f.invalid != 'd') OR f.invalid IS NULL)
+            ORDER BY h.order_id
+        """
+        results = store_db.execute(text(query)).fetchall()
+
+        data = []
+        for row in results:
+            data.append({
+                "order_id": row.order_id,
+                "date_ordered": row.date_ordered or '',
+            })
+        return {"data": data}
+
+    except Exception as e:
+        return {"data": []}
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.post("/gc-emails/send")
+def send_gc_emails(
+    payload: dict,
+    site_id: int = Query(..., description="Store/site ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Send selected pending GC emails. payload: {order_ids: [int]}"""
+    store_db = None
+    try:
+        order_ids = payload.get('order_ids', [])
+        if not order_ids:
+            raise HTTPException(status_code=400, detail="No order IDs provided")
+
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        store_db = get_store_session(store_db_name)
+
+        # For now, just delete from hold_emails (actual email sending would need SMTP config)
+        # In the old platform, sendHoldEmails sends the email then deletes the record
+        placeholders = ", ".join([f":id_{i}" for i in range(len(order_ids))])
+        params = {f"id_{i}": oid for i, oid in enumerate(order_ids)}
+
+        store_db.execute(
+            text(f"DELETE FROM hold_emails WHERE order_id IN ({placeholders}) AND type = 'gc_send'"),
+            params
+        )
+        store_db.commit()
+
+        return {"message": f"Gift certificate emails sent for {len(order_ids)} order(s)"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.post("/gc-emails/delete")
+def delete_gc_emails(
+    payload: dict,
+    site_id: int = Query(..., description="Store/site ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete selected pending GC emails. payload: {order_ids: [int]}"""
+    store_db = None
+    try:
+        order_ids = payload.get('order_ids', [])
+        if not order_ids:
+            raise HTTPException(status_code=400, detail="No order IDs provided")
+
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        store_db = get_store_session(store_db_name)
+
+        placeholders = ", ".join([f":id_{i}" for i in range(len(order_ids))])
+        params = {f"id_{i}": oid for i, oid in enumerate(order_ids)}
+
+        store_db.execute(
+            text(f"DELETE FROM hold_emails WHERE order_id IN ({placeholders}) AND type = 'gc_send'"),
+            params
+        )
+        store_db.commit()
+
+        return {"message": f"Gift certificate emails deleted for {len(order_ids)} order(s)"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+# =========================================
+# GIFT CERTIFICATE REPORT / TRACKING
+# =========================================
+@router.get("/gc-report")
+def get_gc_report(
+    site_id: int = Query(..., description="Store/site ID"),
+    search: Optional[str] = None,
+    display: Optional[str] = "all",
+    sort_by: Optional[str] = "code",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get gift certificate tracking report with search/filter/sort."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            return {"data": [], "totals": {"total_amount": "0.00", "remaining_amount": "0.00"}}
+
+        store_db = get_store_session(store_db_name)
+
+        # Check if gift_certificates table exists
+        try:
+            store_db.execute(text("SELECT 1 FROM gift_certificates LIMIT 0"))
+        except Exception:
+            return {"data": [], "totals": {"total_amount": "0.00", "remaining_amount": "0.00"}}
+
+        base_query = """
+            SELECT g.id, g.code, g.pin, g.total_amount, g.remaining_amount,
+                   g.history, g.expiration, g.date_created, g.one_time_use, g.order_id
+            FROM gift_certificates g
+        """
+
+        conditions = []
+        params = {}
+
+        # Display filter
+        if display == 'active':
+            conditions.append("(g.expiration > NOW() OR g.expiration IS NULL OR g.expiration = '0000-00-00 00:00:00')")
+            conditions.append("g.remaining_amount > 0")
+        elif display == 'expired':
+            conditions.append("g.expiration <= NOW()")
+            conditions.append("g.expiration IS NOT NULL")
+            conditions.append("g.expiration != '0000-00-00 00:00:00'")
+        elif display == 'unused':
+            conditions.append("g.remaining_amount = g.total_amount")
+        elif display == 'used':
+            conditions.append("g.remaining_amount < g.total_amount")
+
+        # Search filter
+        if search:
+            conditions.append("(g.code LIKE :search OR g.order_id LIKE :search_oid)")
+            params['search'] = f"%{search}%"
+            params['search_oid'] = f"%{search}%"
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        # Sort
+        valid_sorts = {'code': 'g.code', 'total_amount': 'g.total_amount',
+                       'remaining_amount': 'g.remaining_amount', 'expiration': 'g.expiration',
+                       'date_created': 'g.date_created'}
+        order_col = valid_sorts.get(sort_by, 'g.code')
+
+        full_query = f"{base_query} {where_clause} ORDER BY {order_col} LIMIT 500"
+        results = store_db.execute(text(full_query), params).fetchall()
+
+        data = []
+        total_amount_sum = 0.0
+        remaining_amount_sum = 0.0
+
+        for row in results:
+            total_amt = float(row.total_amount or 0)
+            remaining_amt = float(row.remaining_amount or 0)
+            total_amount_sum += total_amt
+            remaining_amount_sum += remaining_amt
+
+            exp = str(row.expiration) if row.expiration else ''
+            if exp in ('None', '0000-00-00 00:00:00', ''):
+                exp = ''
+
+            data.append({
+                "id": row.id,
+                "code": row.code or '',
+                "pin": row.pin if hasattr(row, 'pin') and row.pin else '',
+                "total_amount": f"{total_amt:.2f}",
+                "remaining_amount": f"{remaining_amt:.2f}",
+                "expiration": exp,
+                "date_created": str(row.date_created) if row.date_created else '',
+                "one_time_use": row.one_time_use or 'n',
+                "history": row.history or '',
+                "order_id": str(row.order_id) if row.order_id else '',
+            })
+
+        return {
+            "data": data,
+            "totals": {
+                "total_amount": f"{total_amount_sum:.2f}",
+                "remaining_amount": f"{remaining_amount_sum:.2f}",
+            }
+        }
+
+    except Exception as e:
+        return {"data": [], "totals": {"total_amount": "0.00", "remaining_amount": "0.00"}}
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.get("/gc-history/{gc_id}")
+def get_gc_history(
+    gc_id: int,
+    site_id: int = Query(..., description="Store/site ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get history for a specific gift certificate."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            return {"history": ""}
+
+        store_db = get_store_session(store_db_name)
+        result = store_db.execute(
+            text("SELECT history, code FROM gift_certificates WHERE id = :gc_id"),
+            {"gc_id": gc_id}
+        ).first()
+
+        if not result:
+            return {"history": "", "code": ""}
+
+        return {"history": result.history or '', "code": result.code or ''}
+
+    except Exception as e:
+        return {"history": "", "code": ""}
+    finally:
+        if store_db:
+            store_db.close()
+
+
+# =========================================
+# GIFT CERTIFICATE ADJUST
+# =========================================
+@router.post("/gc-adjust")
+def adjust_gift_certificates(
+    payload: dict,
+    site_id: int = Query(..., description="Store/site ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Adjust gift certificate amounts, toggle one-time use, or delete.
+    payload: {edit: [ids], adjust: 'add'|'subtract', adjust_amount: str, remove: 'y'|'n', one_time: [ids]}
+    """
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        store_db = get_store_session(store_db_name)
+
+        edit_ids = payload.get('edit', [])
+        adjust_type = payload.get('adjust', '')
+        adjust_amount = payload.get('adjust_amount', '0')
+        remove = payload.get('remove', 'n')
+        one_time_ids = payload.get('one_time', [])
+
+        today = datetime.now().strftime('%Y-%m-%d')
+
+        if edit_ids:
+            placeholders = ", ".join([f":id_{i}" for i in range(len(edit_ids))])
+            id_params = {f"id_{i}": eid for i, eid in enumerate(edit_ids)}
+
+            if remove == 'y':
+                store_db.execute(
+                    text(f"DELETE FROM gift_certificates WHERE id IN ({placeholders})"),
+                    id_params
+                )
+            else:
+                try:
+                    amount = float(adjust_amount)
+                except (ValueError, TypeError):
+                    amount = 0.0
+
+                if amount > 0:
+                    if adjust_type == 'subtract':
+                        hist_note = f"{today}\\tRemoved ${adjust_amount}|"
+                        store_db.execute(
+                            text(f"""UPDATE gift_certificates
+                                SET total_amount = total_amount - :amt,
+                                    remaining_amount = remaining_amount - :amt,
+                                    history = CONCAT(IFNULL(history,''), :hist)
+                                WHERE id IN ({placeholders})"""),
+                            {**id_params, "amt": amount, "hist": hist_note}
+                        )
+                        store_db.execute(text("UPDATE gift_certificates SET total_amount = 0.00 WHERE total_amount < 0"))
+                        store_db.execute(text("UPDATE gift_certificates SET remaining_amount = 0.00 WHERE remaining_amount < 0"))
+                    elif adjust_type == 'add':
+                        hist_note = f"{today}\\tAdded ${adjust_amount}|"
+                        store_db.execute(
+                            text(f"""UPDATE gift_certificates
+                                SET total_amount = total_amount + :amt,
+                                    remaining_amount = remaining_amount + :amt,
+                                    history = CONCAT(IFNULL(history,''), :hist)
+                                WHERE id IN ({placeholders})"""),
+                            {**id_params, "amt": amount, "hist": hist_note}
+                        )
+
+        # Handle one_time_use flags for all GCs that were in the edit list
+        if edit_ids and remove != 'y':
+            for eid in edit_ids:
+                if eid in one_time_ids:
+                    store_db.execute(
+                        text("""UPDATE gift_certificates
+                            SET one_time_use = 'y',
+                                history = CONCAT(IFNULL(history,''), :hist)
+                            WHERE id = :gc_id AND (one_time_use != 'y' OR one_time_use IS NULL)"""),
+                        {"gc_id": eid, "hist": f"{today}\\tFlagged as one time-use|"}
+                    )
+                else:
+                    store_db.execute(
+                        text("""UPDATE gift_certificates
+                            SET one_time_use = 'n'
+                            WHERE id = :gc_id AND one_time_use = 'y'"""),
+                        {"gc_id": eid}
+                    )
+
+        store_db.commit()
+        return {"message": "Gift certificates adjusted successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+# =========================================
+# CREATE GIFT CERTIFICATES (BULK)
+# =========================================
+@router.post("/gc-create")
+def create_gift_certificates_bulk(
+    site_id: int = Query(..., description="Store/site ID"),
+    value: str = Form(...),
+    days_available: str = Form("0"),
+    qty: str = Form("0"),
+    one_time_use: str = Form("n"),
+    history: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Bulk create gift certificates."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        store_db = get_store_session(store_db_name)
+
+        import random
+        import string
+
+        try:
+            cert_value = float(value)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid value")
+
+        try:
+            quantity = int(qty)
+        except (ValueError, TypeError):
+            quantity = 0
+
+        if quantity < 1:
+            raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+        if quantity > 5000:
+            raise HTTPException(status_code=400, detail="Maximum 5000 certificates per batch")
+
+        # Calculate expiration
+        expiration = None
+        try:
+            days = int(days_available)
+            if days > 0:
+                from datetime import timedelta
+                expiration = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        except (ValueError, TypeError):
+            pass
+
+        today = datetime.now().strftime('%Y-%m-%d')
+        hist_note = f"{today}\\tCreated {history}|" if history else f"{today}\\tCreated|"
+
+        created_codes = []
+        nocodes = []
+
+        for _ in range(quantity):
+            # Generate random 10-char code
+            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
+
+            # Check uniqueness
+            existing = store_db.execute(
+                text("SELECT id FROM gift_certificates WHERE code = :code"),
+                {"code": code}
+            ).first()
+
+            if existing:
+                nocodes.append(code)
+                # Try again with different code
+                code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
+                existing2 = store_db.execute(
+                    text("SELECT id FROM gift_certificates WHERE code = :code"),
+                    {"code": code}
+                ).first()
+                if existing2:
+                    nocodes.append(code)
+                    continue
+
+            store_db.execute(
+                text("""INSERT INTO gift_certificates
+                    SET code = :code, total_amount = :val, remaining_amount = :val,
+                        expiration = :exp, one_time_use = :otu,
+                        history = :hist, date_created = NOW()"""),
+                {
+                    "code": code, "val": cert_value, "exp": expiration,
+                    "otu": one_time_use, "hist": hist_note
+                }
+            )
+            created_codes.append(code)
+
+        store_db.commit()
+
+        return {
+            "message": f"Created {len(created_codes)} gift certificate(s)",
+            "created": len(created_codes),
+            "codes": created_codes,
+            "nocodes": nocodes,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if store_db:
+            store_db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
 
 
 # =========================================
@@ -1255,3 +1762,221 @@ def get_order_detail(
             store_db.close()
 
 
+# =========================================
+# ORDER HISTORY IMPORT
+# =========================================
+@router.post("/import-history")
+async def import_order_history(
+    cv3_list: UploadFile = File(...),
+    cv3_type: str = Form('tab'),
+    cv3_char_set: str = Form('cp1252'),
+    cv3_email: str = Form(''),
+    on_duplicate: str = Form('update_status_tracking'),
+    site_id: int = Query(..., description="Store/site ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Import order history from a delimited file."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(db, site_id)
+        store_db = get_store_session(store_db_name)
+
+        raw_bytes = await cv3_list.read()
+        try:
+            content = raw_bytes.decode(cv3_char_set)
+        except (UnicodeDecodeError, LookupError):
+            content = raw_bytes.decode('utf-8', errors='replace')
+
+        delimiters = {'tab': '\t', 'pipe': '|', 'comma': ','}
+        delimiter = delimiters.get(cv3_type, '\t')
+
+        reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
+        rows = list(reader)
+
+        if not rows:
+            raise HTTPException(status_code=400, detail="No data rows found in the import file")
+
+        imported = 0
+        skipped = 0
+        updated = 0
+
+        try:
+            oh_cols = {row[0] for row in store_db.execute(text("SHOW COLUMNS FROM order_history")).fetchall()}
+        except Exception:
+            store_db.execute(text("""
+                CREATE TABLE IF NOT EXISTS order_history (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    order_id VARCHAR(50),
+                    email VARCHAR(255),
+                    status VARCHAR(100),
+                    tracking VARCHAR(255),
+                    date_ordered VARCHAR(50),
+                    total DECIMAL(10,2) DEFAULT 0,
+                    ship_name VARCHAR(255),
+                    imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            store_db.commit()
+            oh_cols = {row[0] for row in store_db.execute(text("SHOW COLUMNS FROM order_history")).fetchall()}
+
+        for row in rows:
+            normalized = {k.lower().strip(): v.strip() if v else '' for k, v in row.items() if k}
+            order_id = normalized.get('order_id', normalized.get('orderid', ''))
+            email = normalized.get('email', '')
+
+            if not order_id:
+                skipped += 1
+                continue
+
+            existing = None
+            if 'order_id' in oh_cols:
+                existing = store_db.execute(
+                    text("SELECT id FROM order_history WHERE order_id = :oid AND email = :email LIMIT 1"),
+                    {"oid": order_id, "email": email}
+                ).first()
+
+            if existing and on_duplicate == 'ignore':
+                skipped += 1
+                continue
+
+            insert_data = {}
+            for file_col, val in normalized.items():
+                db_col = file_col.replace(' ', '_').replace('-', '_')
+                if db_col in oh_cols and db_col != 'id':
+                    insert_data[db_col] = val
+
+            if existing and on_duplicate in ('update_status_tracking', 'replace'):
+                if on_duplicate == 'update_status_tracking':
+                    update_fields = {}
+                    for f in ['status', 'tracking']:
+                        if f in insert_data:
+                            update_fields[f] = insert_data[f]
+                    if update_fields:
+                        sets = ", ".join(f"{k} = :{k}" for k in update_fields)
+                        update_fields['rid'] = existing[0]
+                        store_db.execute(text(f"UPDATE order_history SET {sets} WHERE id = :rid"), update_fields)
+                else:
+                    sets = ", ".join(f"{k} = :{k}" for k in insert_data)
+                    insert_data['rid'] = existing[0]
+                    store_db.execute(text(f"UPDATE order_history SET {sets} WHERE id = :rid"), insert_data)
+                updated += 1
+            else:
+                if insert_data:
+                    cols = ", ".join(insert_data.keys())
+                    vals = ", ".join(f":{k}" for k in insert_data.keys())
+                    store_db.execute(text(f"INSERT INTO order_history ({cols}) VALUES ({vals})"), insert_data)
+                    imported += 1
+
+        store_db.commit()
+
+        return {
+            "message": f"Import complete. {imported} imported, {updated} updated, {skipped} skipped.",
+            "imported": imported,
+            "updated": updated,
+            "skipped": skipped,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+    finally:
+        if store_db:
+            store_db.close()
+
+
+# =========================================
+# ORDER STATUS IMPORT
+# =========================================
+@router.post("/import-status")
+async def import_order_status(
+    cv3_list: UploadFile = File(...),
+    cv3_type: str = Form('tab'),
+    cv3_email: str = Form(''),
+    site_id: int = Query(..., description="Store/site ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Import order status/tracking updates from a delimited file."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(db, site_id)
+        store_db = get_store_session(store_db_name)
+
+        raw_bytes = await cv3_list.read()
+        try:
+            content = raw_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            content = raw_bytes.decode('cp1252', errors='replace')
+
+        delimiters = {'tab': '\t', 'pipe': '|', 'comma': ','}
+        delimiter = delimiters.get(cv3_type, '\t')
+
+        reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
+        rows = list(reader)
+
+        if not rows:
+            raise HTTPException(status_code=400, detail="No data rows found in the import file")
+
+        try:
+            order_cols = {row[0] for row in store_db.execute(text("SHOW COLUMNS FROM orders")).fetchall()}
+        except Exception:
+            raise HTTPException(status_code=500, detail="Orders table not found in store database")
+
+        updated_count = 0
+        not_found = 0
+
+        for row in rows:
+            normalized = {k.lower().strip(): v.strip() if v else '' for k, v in row.items() if k}
+            order_id = normalized.get('order_id', normalized.get('orderid', normalized.get('id', '')))
+            if not order_id:
+                continue
+
+            update_fields = {}
+            field_mapping = {
+                'status': 'status',
+                'order_status': 'status',
+                'tracking': 'tracking',
+                'tracking_number': 'tracking',
+                'tracking_url': 'tracking_url',
+                'ship_date': 'ship_date',
+                'shipped_date': 'ship_date',
+            }
+
+            for file_col, db_col in field_mapping.items():
+                if file_col in normalized and normalized[file_col] and db_col in order_cols:
+                    update_fields[db_col] = normalized[file_col]
+
+            if not update_fields:
+                continue
+
+            existing = store_db.execute(
+                text("SELECT id FROM orders WHERE id = :oid LIMIT 1"),
+                {"oid": order_id}
+            ).first()
+
+            if not existing:
+                not_found += 1
+                continue
+
+            sets = ", ".join(f"{k} = :{k}" for k in update_fields)
+            update_fields['oid'] = order_id
+            store_db.execute(text(f"UPDATE orders SET {sets} WHERE id = :oid"), update_fields)
+            updated_count += 1
+
+        store_db.commit()
+
+        return {
+            "message": f"Status import complete. {updated_count} orders updated, {not_found} not found.",
+            "updated": updated_count,
+            "not_found": not_found,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Status import failed: {str(e)}")
+    finally:
+        if store_db:
+            store_db.close()

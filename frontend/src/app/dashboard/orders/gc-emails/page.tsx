@@ -1,166 +1,120 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
+interface PendingEmail {
+  order_id: string;
+  date_ordered: string;
+}
+
 export default function OrderGCEmailsPage() {
-  const [gcCode, setGcCode] = useState('');
-  const [recipientEmail, setRecipientEmail] = useState('');
-  const [senderName, setSenderName] = useState('');
-  const [message, setMessage] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [emails, setEmails] = useState<PendingEmail[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => { fetchEmails(); }, []);
 
-    if (!gcCode || !recipientEmail || !senderName) {
-      setError('Please fill in all required fields');
-      return;
-    }
-
+  const fetchEmails = async () => {
     try {
-      setLoading(true);
-      await api.post('/orders/gc/send-email', {
-        gc_code: gcCode,
-        recipient_email: recipientEmail,
-        sender_name: senderName,
-        message: message,
-      });
-
-      setSuccess(true);
-      setGcCode('');
-      setRecipientEmail('');
-      setSenderName('');
-      setMessage('');
-      setError(null);
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (err) {
-      console.error('Failed to send email:', err);
-      setError('Failed to send gift certificate email. Please try again.');
+      const res = await api.get('/orders/gc-emails');
+      setEmails(res.data.data || []);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to load pending emails');
     } finally {
       setLoading(false);
     }
   };
 
+  const toggleAll = (checked: boolean) => {
+    if (checked) {
+      setSelected(new Set(emails.map(e => e.order_id)));
+    } else {
+      setSelected(new Set());
+    }
+  };
+
+  const toggleOne = (orderId: string) => {
+    const next = new Set(selected);
+    if (next.has(orderId)) next.delete(orderId);
+    else next.add(orderId);
+    setSelected(next);
+  };
+
+  const handleAction = async (action: 'send' | 'delete') => {
+    if (selected.size === 0) {
+      setError('Please select at least one order');
+      return;
+    }
+    setError(null); setSuccess(null);
+    try {
+      const endpoint = action === 'send' ? '/orders/gc-emails/send' : '/orders/gc-emails/delete';
+      await api.post(endpoint, { order_ids: Array.from(selected) });
+      setSuccess(action === 'send' ? 'Gift certificate emails sent successfully' : 'Gift certificate emails deleted successfully');
+      setSelected(new Set());
+      fetchEmails();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || `Failed to ${action} emails`);
+    }
+  };
+
+  if (loading) return <div className="container-fluid" style={{padding:'20px'}}><p><i className="fa fa-spinner fa-spin"></i> Loading...</p></div>;
+
   return (
-    <div className="container-fluid" style={{ padding: '20px' }}>
-      <h1>Gift Certificate Emails</h1>
-      <p className="text-muted">Send gift certificate codes to recipients via email</p>
-      <hr />
-
+    <div className="container-fluid" style={{padding:'20px'}}>
+      <div className="row"><div className="col-lg-12">
+        <h1>Pending Gift Certificate Emails</h1>
+        <p><i className="fa fa-info-circle"></i> List and send pending gift certificate code emails.</p>
+      </div></div>
+      <br />
+      <p>
+        <a className="btn btn-primary btn-sm" href="/dashboard/orders/pending">Pending Orders</a>
+      </p>
+      <br />
       {error && <div className="alert alert-danger">{error}</div>}
-      {success && <div className="alert alert-success">Gift certificate email sent successfully!</div>}
+      {success && <div className="alert alert-success">{success}</div>}
 
-      <div className="row">
-        <div className="col-md-8">
-          <div className="panel panel-default">
-            <div className="panel-heading">
-              <h3 className="panel-title">Send Gift Certificate Email</h3>
-            </div>
-            <div className="panel-body">
-              <form onSubmit={handleSend}>
-                <div className="form-group">
-                  <label htmlFor="gcCode">Gift Certificate Code *</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    id="gcCode"
-                    value={gcCode}
-                    onChange={(e) => setGcCode(e.target.value)}
-                    placeholder="e.g., GC-2024-001"
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="recipientEmail">Recipient Email Address *</label>
-                  <input
-                    type="email"
-                    className="form-control"
-                    id="recipientEmail"
-                    value={recipientEmail}
-                    onChange={(e) => setRecipientEmail(e.target.value)}
-                    placeholder="recipient@example.com"
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="senderName">Sender Name *</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    id="senderName"
-                    value={senderName}
-                    onChange={(e) => setSenderName(e.target.value)}
-                    placeholder="Your name"
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="message">Personal Message</label>
-                  <textarea
-                    className="form-control"
-                    id="message"
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    rows={4}
-                    placeholder="Add a personal message (optional)"
-                  ></textarea>
-                </div>
-
-                <div className="form-group">
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-lg"
-                    disabled={loading}
-                  >
-                    {loading ? (
-                      <>
-                        <i className="fa fa-spinner fa-spin"></i> Sending...
-                      </>
-                    ) : (
-                      <>
-                        <i className="fa fa-envelope"></i> Send Email
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
+      {emails.length === 0 ? (
+        <p className="text-center">There are no gift certificate emails waiting to be sent</p>
+      ) : (
+        <>
+          <div className="well well-cv3-table">
+            <div className="table-responsive">
+              <table className="table table-hover table-striped cv3-data-table">
+                <thead>
+                  <tr>
+                    <th className="text-left"><b>Order ID</b></th>
+                    <th className="text-center"><b>Date Ordered</b></th>
+                    <th className="text-center">
+                      Select&nbsp;
+                      <input type="checkbox" checked={selected.size === emails.length && emails.length > 0} onChange={(e) => toggleAll(e.target.checked)} />
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {emails.map((email) => (
+                    <tr key={email.order_id}>
+                      <td>
+                        <a href={`/dashboard/orders/detail/${email.order_id}`}>{email.order_id}</a>
+                      </td>
+                      <td className="text-center">{email.date_ordered}</td>
+                      <td className="text-center">
+                        <input type="checkbox" checked={selected.has(email.order_id)} onChange={() => toggleOne(email.order_id)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
-        </div>
-
-        <div className="col-md-4">
-          <div className="panel panel-info">
-            <div className="panel-heading">
-              <h3 className="panel-title">Information</h3>
-            </div>
-            <div className="panel-body">
-              <p>
-                <strong>Gift Certificate Emails:</strong> Send gift certificate codes to your customers or gift recipients.
-              </p>
-              <hr />
-              <p>
-                <strong>What Gets Sent:</strong>
-              </p>
-              <ul>
-                <li>Gift certificate code</li>
-                <li>Instructions on how to use</li>
-                <li>Link to your store</li>
-                <li>Personal message (optional)</li>
-              </ul>
-              <hr />
-              <p className="text-muted">
-                The recipient will receive an email with all the information needed to redeem the gift certificate.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+          <p className="text-center">
+            <button type="button" className="btn btn-primary" onClick={() => handleAction('delete')} style={{marginRight:'10px'}}>Delete Emails</button>
+            <button type="button" className="btn btn-primary" onClick={() => handleAction('send')}>Send Emails</button>
+          </p>
+        </>
+      )}
     </div>
   );
 }

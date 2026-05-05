@@ -441,6 +441,9 @@ export default function Sidebar() {
           subItems: [
             { label: 'Custom', href: '/dashboard/tax/rate-tool/custom' },
             { label: 'Avalara', href: '/dashboard/tax/rate-tool/avalara' },
+            { label: 'Mach', href: '/dashboard/tax/rate-tool/mach' },
+            { label: 'TaxJar', href: '/dashboard/tax/rate-tool/taxjar' },
+            { label: 'Thomson Reuters', href: '/dashboard/tax/rate-tool/thomsonreuters' },
           ],
         },
       ],

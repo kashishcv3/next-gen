@@ -1,125 +1,112 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-interface Message {
-  id: number;
-  login_page_message: string;
-  main_page_message: string;
-  updated_at: string | null;
-}
-
-export default function StoreLoginpagemessagesPage() {
-  const [message, setMessage] = useState<Message | null>(null);
+export default function AdminMessagesPage() {
   const [loginMessage, setLoginMessage] = useState('');
   const [mainMessage, setMainMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await api.get('/stores/loginpagemessages');
-        setLoginMessage(response.data.login_page_message || '');
-        setMainMessage(response.data.main_page_message || '');
-      } catch (err) {
-        setError('Failed to load login page messages');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
+    fetchMessages();
   }, []);
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    setSaveSuccess(null);
-    setError(null);
-
+  const fetchMessages = async () => {
     try {
-      await api.post(
-        '/stores/loginpagemessages',
-        {
-          login_page_message: loginMessage,
-          main_page_message: mainMessage,
-        }
-      );
-      setSaveSuccess('Messages saved successfully');
-    } catch (err) {
-      setError('Failed to save messages');
+      const res = await api.get('/stores/loginpagemessages');
+      setLoginMessage(res.data.login_page_message || '');
+      setMainMessage(res.data.main_page_message || '');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to load messages');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
-  const formatDate = (dateString: string | null) => {
-    if (!dateString) return 'Never';
-    const date = new Date(dateString);
-    return date.toLocaleString();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSuccess(null);
+    setError(null);
+    try {
+      await api.post('/stores/loginpagemessages', {
+        login_page_message: loginMessage,
+        main_page_message: mainMessage,
+      });
+      setSuccess('Messages saved successfully');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to save messages');
+    }
   };
 
-  if (loading) return <div className="container"><p>Loading...</p></div>;
+  if (loading) {
+    return (
+      <div className="container-fluid" style={{ padding: '20px' }}>
+        <p><i className="fa fa-spinner fa-spin"></i> Loading...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="container" style={{ marginTop: '20px' }}>
+    <div className="container-fluid" style={{ padding: '20px' }}>
       <div className="row">
-        <div className="col-md-10">
-          <h1>Login Page Messages</h1>
+        <div className="col-lg-12">
+          <h1>Admin Messages</h1>
+          <p>
+            <i className="fa fa-info-circle"></i> To set a login or mainpage message for the CV3 admin, fill in the appropriate textareas below.
+          </p>
+        </div>
+      </div>
 
-          {error && <div className="alert alert-danger">{error}</div>}
-          {saveSuccess && <div className="alert alert-success">{saveSuccess}</div>}
+      {error && (
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="alert alert-danger">{error}</div>
+          </div>
+        </div>
+      )}
 
-          {message && (
-            <div className="alert alert-info">
-              Last updated: {formatDate(message.updated_at)}
-            </div>
-          )}
+      {success && (
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="alert alert-success">{success}</div>
+          </div>
+        </div>
+      )}
 
-          <form onSubmit={handleSave} className="form-horizontal">
-            <div className="form-group">
-              <label htmlFor="loginMessage" className="col-sm-3 control-label">
-                Login Page Message
-              </label>
-              <div className="col-sm-9">
-                <textarea
-                  id="loginMessage"
-                  className="form-control"
-                  rows={6}
-                  value={loginMessage}
-                  onChange={(e) => setLoginMessage(e.target.value)}
-                  placeholder="Enter message to display on login page"
-                />
+      <div className="row">
+        <div className="col-lg-12">
+          <form onSubmit={handleSubmit}>
+            <div className="panel panel-primary">
+              <div className="panel-heading">
+                <h3 className="panel-title"><i className="fa fa-cogs"></i> Admin Messages</h3>
+              </div>
+              <div className="panel-body">
+                <div className="form-group">
+                  <label>Admin Login Message</label>
+                  <textarea
+                    className="form-control"
+                    rows={10}
+                    value={loginMessage}
+                    onChange={(e) => setLoginMessage(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Main Page Message</label>
+                  <textarea
+                    className="form-control"
+                    rows={10}
+                    value={mainMessage}
+                    onChange={(e) => setMainMessage(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
-
-            <div className="form-group">
-              <label htmlFor="mainMessage" className="col-sm-3 control-label">
-                Main Page Message
-              </label>
-              <div className="col-sm-9">
-                <textarea
-                  id="mainMessage"
-                  className="form-control"
-                  rows={6}
-                  value={mainMessage}
-                  onChange={(e) => setMainMessage(e.target.value)}
-                  placeholder="Enter message to display on main admin page"
-                />
-              </div>
-            </div>
-
-            <div className="form-group">
-              <div className="col-sm-offset-3 col-sm-9">
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Saving...' : 'Save Messages'}
-                </button>
-              </div>
-            </div>
+            <button type="submit" className="btn btn-primary">
+              <i className="fa fa-save"></i> Save Messages
+            </button>
           </form>
         </div>
       </div>

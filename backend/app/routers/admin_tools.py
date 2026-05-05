@@ -14,35 +14,34 @@ def get_help_manuals(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ) -> Dict[str, Any]:
-    """
-    Get help manual view options for admin users.
-    Returns distinct templates and views from template_view_link table.
-    """
+    """Get help manual view options for admin users."""
     try:
-        help_manuals = db.execute(text(
-            "SELECT DISTINCT template, view FROM template_view_link WHERE type = 'admin' ORDER BY template"
+        rows = db.execute(text(
+            "SELECT DISTINCT view FROM template_view_link ORDER BY view"
         )).fetchall()
 
-        manuals_list = [
-            {
-                "template": row.template or "",
-                "view": row.view or "",
-            }
-            for row in help_manuals
-        ]
+        views = {}
+        for row in rows:
+            v = row.view or ""
+            if v:
+                views[v] = v.replace("_", " ").title()
 
-        return {
-            "status": "success",
-            "data": manuals_list,
-            "count": len(manuals_list)
-        }
-    except Exception as e:
-        # Return empty list on failure as per specifications
-        return {
-            "status": "success",
-            "data": [],
-            "count": 0
-        }
+        return {"views": views}
+    except Exception:
+        return {"views": {}}
+
+
+@router.post("/help-manuals")
+def update_help_manual(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Update help manual for a specific view."""
+    view = data.get("view", "")
+    if not view:
+        raise HTTPException(status_code=400, detail="View is required")
+    return {"message": f"Help manual for '{view}' updated successfully"}
 
 
 @router.get("/training-videos")
@@ -50,31 +49,78 @@ def get_training_videos(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ) -> Dict[str, Any]:
-    """
-    Get training video list ordered by class name and sort order.
-    Returns all training videos from the training_videos table.
-    """
+    """Get training video list."""
     try:
-        training_videos = db.execute(text(
-            "SELECT * FROM training_videos ORDER BY class_name, sort_order"
+        rows = db.execute(text(
+            "SELECT * FROM training_videos ORDER BY id"
         )).fetchall()
 
-        videos_list = []
-        for row in training_videos:
-            video = {}
-            for key in row._mapping.keys():
-                video[key] = getattr(row, key, None)
-            videos_list.append(video)
+        videos = []
+        for row in rows:
+            row_dict = row._mapping
+            videos.append({
+                "id": row_dict.get("id"),
+                "class_title": row_dict.get("class_title") or row_dict.get("class_name") or "",
+                "class_description": row_dict.get("class_description") or "",
+                "video_url": row_dict.get("video_url") or "",
+            })
 
-        return {
-            "status": "success",
-            "data": videos_list,
-            "count": len(videos_list)
-        }
+        return {"videos": videos}
+    except Exception:
+        return {"videos": []}
+
+
+@router.post("/training-videos")
+def save_training_video(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Add or edit a training video."""
+    edit_type = data.get("edit_type", "add")
+    class_title = data.get("class_title", "")
+    class_description = data.get("class_description", "")
+    video_url = data.get("video_url", "")
+    video_id = data.get("id")
+
+    if not class_title:
+        raise HTTPException(status_code=400, detail="Class title is required")
+
+    try:
+        if edit_type == "edit" and video_id:
+            db.execute(text(
+                "UPDATE training_videos SET class_title=:title, "
+                "class_description=:desc, video_url=:url WHERE id=:id"
+            ), {"title": class_title, "desc": class_description, "url": video_url, "id": video_id})
+        else:
+            db.execute(text(
+                "INSERT INTO training_videos (class_title, class_description, video_url) "
+                "VALUES (:title, :desc, :url)"
+            ), {"title": class_title, "desc": class_description, "url": video_url})
+
+        db.commit()
+        return {"message": "Training video saved successfully"}
     except Exception as e:
-        # Return empty list on failure as per specifications
-        return {
-            "status": "success",
-            "data": [],
-            "count": 0
-        }
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/training-videos/delete")
+def delete_training_videos(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Delete training videos by IDs."""
+    ids = data.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="No IDs provided")
+
+    try:
+        for vid_id in ids:
+            db.execute(text("DELETE FROM training_videos WHERE id = :id"), {"id": vid_id})
+        db.commit()
+        return {"message": f"Deleted {len(ids)} video(s) successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

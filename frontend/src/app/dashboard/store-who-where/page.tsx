@@ -1,124 +1,184 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '@/lib/api';
 
-interface Site {
-  id: number;
-  name: string;
-  domain: string;
+interface SiteInfo {
+  store: string;
+  suri: string;
+  bob: string;
+  sessions: string;
   is_live: string;
-  in_cloud: string;
-  admin_host: string;
 }
 
-export default function StoreWhoWherePage() {
-  const [allSites, setAllSites] = useState<Site[]>([]);
-  const [filteredSites, setFilteredSites] = useState<Site[]>([]);
-  const [filter, setFilter] = useState<'all' | 'live' | 'non-live'>('all');
+interface DbGroup {
+  db_name: string;
+  live_count: number;
+  test_count: number;
+  sites: SiteInfo[];
+}
+
+export default function WhoWherePage() {
+  const [dbGroups, setDbGroups] = useState<DbGroup[]>([]);
+  const [filter, setFilter] = useState<'all' | 'live' | 'nonlive'>('all');
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const response = await api.get('/stores/who-where');
-        setAllSites(response.data.sites);
-        setFilteredSites(response.data.sites);
-      } catch (err) {
-        setError('Failed to load server location data');
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
   }, []);
 
-  const handleFilterChange = (newFilter: 'all' | 'live' | 'non-live') => {
-    setFilter(newFilter);
-    let filtered = allSites;
-    if (newFilter === 'live') {
-      filtered = allSites.filter((site) => site.is_live === 'y');
-    } else if (newFilter === 'non-live') {
-      filtered = allSites.filter((site) => site.is_live !== 'y');
+  const fetchData = async () => {
+    try {
+      const res = await api.get('/stores/who-where');
+      const sites = res.data.sites || [];
+
+      // Group sites by admin_host (database server)
+      const groups: Record<string, SiteInfo[]> = {};
+      sites.forEach((site: any) => {
+        const host = site.admin_host || 'unknown';
+        if (!groups[host]) groups[host] = [];
+        groups[host].push({
+          store: site.name || '',
+          suri: site.domain || '',
+          bob: site.in_cloud === 'y' ? 'Cloud' : '',
+          sessions: '',
+          is_live: site.is_live || 'n',
+        });
+      });
+
+      const dbGroupList: DbGroup[] = Object.entries(groups).map(([db, dbSites]) => ({
+        db_name: db.replace('.colormaria.net', ''),
+        live_count: dbSites.filter((s) => s.is_live === 'y').length,
+        test_count: dbSites.filter((s) => s.is_live !== 'y').length,
+        sites: dbSites,
+      }));
+
+      setDbGroups(dbGroupList);
+      setTotal(sites.length);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to load data');
+    } finally {
+      setLoading(false);
     }
-    setFilteredSites(filtered);
   };
 
-  if (loading) return <div className="container"><p>Loading...</p></div>;
+  const getFilteredSites = (sites: SiteInfo[]) => {
+    if (filter === 'live') return sites.filter((s) => s.is_live === 'y');
+    if (filter === 'nonlive') return sites.filter((s) => s.is_live !== 'y');
+    return sites;
+  };
+
+  if (loading) {
+    return (
+      <div className="container-fluid" style={{ padding: '20px' }}>
+        <p><i className="fa fa-spinner fa-spin"></i> Loading...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="container" style={{ marginTop: '20px' }}>
-      <h1>Server Locations - Who Where</h1>
-
-      {error && <div className="alert alert-danger">{error}</div>}
-
-      <div className="form-group" style={{ marginBottom: '20px' }}>
-        <label style={{ marginRight: '20px' }}>Filter:</label>
-        <label style={{ marginRight: '20px' }}>
-          <input
-            type="radio"
-            name="filter"
-            value="all"
-            checked={filter === 'all'}
-            onChange={() => handleFilterChange('all')}
-          />
-          All
-        </label>
-        <label style={{ marginRight: '20px' }}>
-          <input
-            type="radio"
-            name="filter"
-            value="live"
-            checked={filter === 'live'}
-            onChange={() => handleFilterChange('live')}
-          />
-          Live
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="filter"
-            value="non-live"
-            checked={filter === 'non-live'}
-            onChange={() => handleFilterChange('non-live')}
-          />
-          Non-Live
-        </label>
+    <div className="container-fluid" style={{ padding: '20px' }}>
+      <div className="row">
+        <div className="col-lg-12">
+          <h1>Who? Where?</h1>
+          <p>
+            <i className="fa fa-info-circle"></i> Do you need to know which database server a store is on? If so, you came to the right place.
+          </p>
+        </div>
       </div>
 
-      <div className="table-responsive">
-        <table className="table table-striped table-bordered">
-          <thead>
-            <tr>
-              <th>Store Name</th>
-              <th>URI</th>
-              <th>Domain</th>
-              <th>Location</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredSites.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="text-center">
-                  No stores found
-                </td>
-              </tr>
-            ) : (
-              filteredSites.map((site) => (
-                <tr key={site.id}>
-                  <td>{site.name}</td>
-                  <td>{site.admin_host}</td>
-                  <td>{site.domain}</td>
-                  <td>{site.in_cloud === 'y' ? 'Cloud' : 'On-Premises'}</td>
-                  <td>{site.is_live === 'y' ? 'Live' : 'Offline'}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      {error && (
+        <div className="row">
+          <div className="col-lg-12">
+            <div className="alert alert-danger">{error}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Filter Controls */}
+      <div className="row">
+        <div className="col-lg-12 text-center">
+          <label className="radio-inline"><strong>Show:</strong></label>
+          <label className="radio-inline">
+            <input
+              type="radio"
+              name="option"
+              checked={filter === 'all'}
+              onChange={() => setFilter('all')}
+            /> <strong>All</strong>
+          </label>
+          <label className="radio-inline">
+            <input
+              type="radio"
+              name="option"
+              checked={filter === 'live'}
+              onChange={() => setFilter('live')}
+            /> <strong>Live Stores</strong>
+          </label>
+          <label className="radio-inline">
+            <input
+              type="radio"
+              name="option"
+              checked={filter === 'nonlive'}
+              onChange={() => setFilter('nonlive')}
+            /> <strong>Non-Live Stores</strong>
+          </label>
+        </div>
+      </div>
+
+      <br />
+
+      {/* DB Server Tables */}
+      <div className="row">
+        <div className="col-lg-12">
+          <div className="well well-cv3-table">
+            <div className="table-responsive">
+              <table>
+                <tbody>
+                  <tr style={{ verticalAlign: 'top' }}>
+                    {dbGroups.map((group) => {
+                      const filteredSites = getFilteredSites(group.sites);
+                      if (filteredSites.length === 0 && filter !== 'all') return null;
+                      return (
+                        <td key={group.db_name} style={{ padding: '0 10px' }}>
+                          <table className="table table-hover table-striped cv3-data-table text-center">
+                            <thead>
+                              <tr>
+                                <th colSpan={2}>
+                                  {group.db_name} (live: {group.live_count} test: {group.test_count})
+                                </th>
+                                <th>BoB</th>
+                                <th>Sessions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredSites.map((site, idx) => (
+                                <tr key={idx}>
+                                  <td className="text-left">{site.store}</td>
+                                  <td>
+                                    {site.suri && (
+                                      <a href={`https://${site.suri}`} target="_blank" rel="noopener noreferrer">
+                                        {site.suri}
+                                      </a>
+                                    )}
+                                  </td>
+                                  <td className="text-left">{site.bob}</td>
+                                  <td className="text-left">{site.sessions}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

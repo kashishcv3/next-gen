@@ -497,30 +497,66 @@ def list_inventory(
             raise HTTPException(status_code=404, detail="Store not found")
         store_db = get_store_session(store_db_name)
 
+        # Discover actual column names dynamically
+        all_cols = [r[0] for r in store_db.execute(text("SHOW COLUMNS FROM products")).fetchall()]
+
+        # Find the stock/quantity column
+        stock_col = None
+        for candidate in ['num_in_stock', 'quantity', 'stock', 'inventory', 'qty', 'in_stock']:
+            if candidate in all_cols:
+                stock_col = candidate
+                break
+        # If no stock column, still list products but without stock info
+        reorder_col = 'reorder_level' if 'reorder_level' in all_cols else None
+        name_col = 'prod_name' if 'prod_name' in all_cols else ('name' if 'name' in all_cols else 'prod_id')
+        sku_col = 'sku' if 'sku' in all_cols else None
+        inactive_col = 'inactive' if 'inactive' in all_cols else None
+
+        # Build SELECT columns
+        select_parts = ['p.prod_id']
+        if name_col:
+            select_parts.append(f'p.{name_col}')
+        if sku_col:
+            select_parts.append(f'p.{sku_col}')
+        if stock_col:
+            select_parts.append(f'p.{stock_col}')
+        if reorder_col:
+            select_parts.append(f'p.{reorder_col}')
+        if inactive_col:
+            select_parts.append(f'p.{inactive_col}')
+
         where_clause = ""
-        if filter == "low":
-            where_clause = "WHERE p.num_in_stock > 0 AND p.num_in_stock <= 10"
-        elif filter == "out":
-            where_clause = "WHERE p.num_in_stock = 0"
+        if stock_col:
+            if filter == "low":
+                where_clause = f"WHERE p.{stock_col} > 0 AND p.{stock_col} <= 10"
+            elif filter == "out":
+                where_clause = f"WHERE p.{stock_col} = 0"
 
         query = f"""
-            SELECT p.prod_id, p.prod_name, p.sku, p.num_in_stock,
-                   p.reorder_level, p.inactive
+            SELECT {', '.join(select_parts)}
             FROM products p
             {where_clause}
-            ORDER BY p.prod_name ASC
+            ORDER BY p.{name_col} ASC
             LIMIT 200
         """
         rows = store_db.execute(text(query)).fetchall()
         items = []
         for row in rows:
-            items.append({
+            item = {
                 "id": str(row.prod_id),
-                "product_name": row.prod_name or "",
-                "sku": row.sku or "",
-                "quantity": row.num_in_stock or 0,
-                "reorder_level": row.reorder_level if hasattr(row, 'reorder_level') and row.reorder_level else 5,
-            })
+                "product_name": getattr(row, name_col, "") or "",
+            }
+            if sku_col:
+                item["sku"] = getattr(row, sku_col, "") or ""
+            if stock_col:
+                item["quantity"] = getattr(row, stock_col, 0) or 0
+            else:
+                item["quantity"] = "N/A"
+            if reorder_col:
+                item["reorder_level"] = getattr(row, reorder_col, 5) or 5
+            else:
+                item["reorder_level"] = 5
+            items.append(item)
 
         return {"data": items, "total": len(items)}
     except HTTPException:
@@ -984,53 +1020,72 @@ def get_product_options_by_type(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get product options by type from site_options table."""
-    store_db = None
+    """Get product options by type from central DB tables (product_options / ebook_options).
+    These tables live in the central colorcommerce database, keyed by site_id."""
     try:
-        store_db_name = get_store_db_name(site_id, db)
-        if not store_db_name:
-            raise HTTPException(status_code=404, detail="Store not found")
-        store_db = get_store_session(store_db_name)
-
-        # Map option types to their site_options key prefixes
-        OPTION_PREFIXES = {
-            "core": ["product_", "prod_", "catalog_"],
-            "ebook": ["ebook_", "digital_"],
-            "notify": ["notify_", "notification_", "product_notify"],
-            "customization": ["custom_", "customization_", "product_custom"],
-            "inventory": ["inventory_", "stock_", "inv_"],
-            "qanda": ["qanda_", "qa_", "question_"],
-            "reviews": ["review_", "product_review_"],
+        # Define which fields belong to each option type (matches old platform getOptionsTables)
+        OPTION_FIELDS = {
+            "core": ['attribute_discount_override', 'refined_search_single', 'consider_kit_parent', 'duplicate_skus'],
+            "reviews": ['rating_usegroups', 'rating_add_cg', 'rating_cg', 'rating_thanks', 'rating_email',
+                        'rating_subject', 'rating_from', 'rating_groups', 'rating_auto', 'request_review',
+                        'request_review_days', 'request_review_from', 'request_review_subject', 'rating_notify',
+                        'rating_notify_email', 'customer_review_rating', 'customer_review_ship_email',
+                        'product_review_sort', 'rating_max', 'request_review_useshipon', 'review_honor_opt_out',
+                        'review_keyword_block'],
+            "inventory": ['inventory_control', 'verify_inventory', 'on_order_override', 'kit_stock_st',
+                          'inventory_control_notify', 'inventory_control_notify_email',
+                          'inventory_control_notify_backorder', 'always_check_cart_inventory'],
+            "notify": ['product_notify', 'product_notify_subject', 'product_notify_email',
+                       'new_product_notify', 'new_product_notify_subject', 'new_product_notify_email'],
+            "customization": ['artifi_enable', 'artifi_siteid', 'artifi_apikey', 'artifi_js'],
+            "qanda": ['qanda_', 'qa_', 'question_'],  # prefix-based for Q&A
+            "ebook": ['masterpoint_enable', 'masterpoint_environment', 'masterpoint_vendorid', 'masterpoint_privatekey'],
         }
 
-        prefixes = OPTION_PREFIXES.get(option_type, [f"{option_type}_"])
+        # ebook options are in ebook_options table; everything else in product_options
+        if option_type == "ebook":
+            table_name = "ebook_options"
+        else:
+            table_name = "product_options"
 
+        fields = OPTION_FIELDS.get(option_type, [])
+
+        # Query the central database (not the store DB)
         try:
-            rows = store_db.execute(text("SELECT * FROM site_options LIMIT 1")).fetchall()
-            if rows:
-                cols = rows[0]._fields if hasattr(rows[0], '_fields') else [r[0] for r in store_db.execute(text("SHOW COLUMNS FROM site_options")).fetchall()]
-                data = {}
-                row = rows[0]
-                for col in cols:
-                    if any(col.startswith(p) or col.startswith(f"so_{p}") for p in prefixes):
-                        val = getattr(row, col, None)
-                        data[col] = str(val) if val is not None else ""
-                if not data:
-                    # Return all columns if no prefix match
-                    for col in cols:
-                        val = getattr(row, col, None)
-                        data[col] = str(val) if val is not None else ""
-                return {"data": data}
-            return {"data": {}}
+            rows = db.execute(text(f"SELECT * FROM `{table_name}` WHERE site_id = :sid LIMIT 1"),
+                              {"sid": site_id}).fetchall()
         except Exception:
+            db.rollback()
             return {"data": {}}
+
+        if not rows:
+            return {"data": {}}
+
+        # Get column names
+        cols = [r[0] for r in db.execute(text(f"SHOW COLUMNS FROM `{table_name}`")).fetchall()]
+        row = rows[0]
+        data = {}
+
+        if option_type == "qanda":
+            # Q&A uses prefix matching
+            for i, col in enumerate(cols):
+                if col == 'site_id':
+                    continue
+                if any(col.startswith(p) for p in fields):
+                    val = row[i] if i < len(row) else None
+                    data[col] = str(val) if val is not None else ""
+        elif fields:
+            # Use explicit field list
+            for i, col in enumerate(cols):
+                if col in fields:
+                    val = row[i] if i < len(row) else None
+                    data[col] = str(val) if val is not None else ""
+
+        return {"data": data}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if store_db:
-            store_db.close()
 
 
 @router.post("/options/{option_type}")
@@ -1041,7 +1096,58 @@ async def save_product_options_by_type(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user),
 ):
-    """Save product options by type."""
+    """Save product options by type to central DB (product_options / ebook_options)."""
+    try:
+        body = await request.json()
+        if not body:
+            return {"message": f"Product {option_type} options saved successfully (no changes)"}
+
+        # ebook options are in ebook_options table; everything else in product_options
+        table_name = "ebook_options" if option_type == "ebook" else "product_options"
+
+        try:
+            cols = [r[0] for r in db.execute(text(f"SHOW COLUMNS FROM `{table_name}`")).fetchall()]
+        except Exception:
+            db.rollback()
+            return {"message": f"Product {option_type} options saved (table not found)"}
+
+        updates = []
+        params = {}
+        for key, value in body.items():
+            if key in cols and key != 'site_id':
+                updates.append(f"`{key}` = :{key}")
+                params[key] = value
+        if updates:
+            params["sid"] = site_id
+            result = db.execute(
+                text(f"UPDATE `{table_name}` SET {', '.join(updates)} WHERE site_id = :sid"),
+                params
+            )
+            if result.rowcount == 0:
+                # Row doesn't exist yet, INSERT it
+                params["site_id"] = site_id
+                insert_cols = ["site_id"] + [k for k in body.keys() if k in cols and k != 'site_id']
+                insert_vals = [":site_id"] + [f":{k}" for k in body.keys() if k in cols and k != 'site_id']
+                db.execute(
+                    text(f"INSERT INTO `{table_name}` ({', '.join(f'`{c}`' for c in insert_cols)}) VALUES ({', '.join(insert_vals)})"),
+                    params
+                )
+            db.commit()
+        return {"message": f"Product {option_type} options saved successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/forms")
+def get_product_forms(
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get custom product forms from custom_forms table."""
     store_db = None
     try:
         store_db_name = get_store_db_name(site_id, db)
@@ -1049,24 +1155,60 @@ async def save_product_options_by_type(
             raise HTTPException(status_code=404, detail="Store not found")
         store_db = get_store_session(store_db_name)
 
-        body = await request.json()
-
         try:
-            cols = [r[0] for r in store_db.execute(text("SHOW COLUMNS FROM site_options")).fetchall()]
-            updates = []
-            params = {}
-            for key, value in body.items():
-                if key in cols:
-                    updates.append(f"{key} = :{key}")
-                    params[key] = value
-            if updates:
-                store_db.execute(text(f"UPDATE site_options SET {', '.join(updates)}"), params)
-                store_db.commit()
-            return {"message": f"Product {option_type} options saved successfully"}
-        except Exception as e:
-            if store_db:
-                store_db.rollback()
-            raise HTTPException(status_code=500, detail=str(e))
+            store_db.execute(text("SELECT 1 FROM `custom_forms` LIMIT 1"))
+        except Exception:
+            return {"data": []}
+
+        rows = store_db.execute(text(
+            "SELECT id, form_name, inactive, customvals FROM `custom_forms` ORDER BY id"
+        )).fetchall()
+
+        forms = []
+        for row in rows:
+            customvals = row[3] or '{}'
+            try:
+                import json
+                fields = json.loads(customvals) if customvals else {}
+                fields_count = len(fields) if isinstance(fields, dict) else 0
+            except Exception:
+                fields_count = 0
+
+            forms.append({
+                "id": str(row[0]),
+                "name": row[1] or f"Form {row[0]}",
+                "inactive": row[2] or 'n',
+                "fields_count": fields_count,
+                "customvals": customvals,
+            })
+        return {"data": forms}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if store_db:
+            store_db.close()
+
+
+@router.delete("/forms/{form_id}")
+def delete_product_form(
+    form_id: int = Path(..., description="Form ID"),
+    site_id: int = Query(..., description="Store ID"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """Delete a custom product form."""
+    store_db = None
+    try:
+        store_db_name = get_store_db_name(site_id, db)
+        if not store_db_name:
+            raise HTTPException(status_code=404, detail="Store not found")
+        store_db = get_store_session(store_db_name)
+
+        store_db.execute(text("DELETE FROM `custom_forms` WHERE id = :fid"), {"fid": form_id})
+        store_db.commit()
+        return {"message": "Form deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:

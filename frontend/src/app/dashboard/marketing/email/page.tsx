@@ -84,7 +84,7 @@ export default function MarketingEmailPage() {
                 onClick={() => {
                   setSearchTerm('');
                   fetchEmails();
-                }
+                }}
                 style={{ marginLeft: '5px' }}
               >
                 Clear

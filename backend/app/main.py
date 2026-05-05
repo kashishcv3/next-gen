@@ -35,6 +35,7 @@ from app.routers import (
     images,
     files_mgmt,
     store_content,
+    customers,
 )
 
 app = FastAPI(
@@ -84,6 +85,7 @@ app.include_router(vendors.router, prefix=settings.API_PREFIX)
 app.include_router(images.router, prefix=settings.API_PREFIX)
 app.include_router(files_mgmt.router, prefix=settings.API_PREFIX)
 app.include_router(store_content.router, prefix=settings.API_PREFIX)
+app.include_router(customers.router, prefix=settings.API_PREFIX)
 
 
 @app.get("/")
